@@ -144,8 +144,8 @@ export function buildPlayerInsightProfile(runs: NormalizedRunV2[], progress: Car
   const actOne = compareGroups(actOneRows, (row) => row.damage <= actOneMedian, (row) => row.damage > actOneMedian, (row) => row.run.win, 4);
   if (actOne && actOne.delta >= .1) insights.push({
     id: 'act-one-damage', category: 'pattern', score: 78 + actOne.delta * 80,
-    title: '第一幕承伤与结果相关',
-    detail: `第一幕承伤不高于 ${Math.round(actOneMedian)} 时胜率 ${pct(actOne.aRate)}，更高时为 ${pct(actOne.bRate)}。`,
+    title: '第一阶段承伤与结果相关',
+    detail: `第一阶段承伤不高于 ${Math.round(actOneMedian)} 时胜率 ${pct(actOne.aRate)}，更高时为 ${pct(actOne.bRate)}。`,
     comparison: [{ label: `≤ ${Math.round(actOneMedian)} 承伤`, value: actOne.aRate, sample: actOne.a.length }, { label: `> ${Math.round(actOneMedian)} 承伤`, value: actOne.bRate, sample: actOne.b.length }]
   });
 

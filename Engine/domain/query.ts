@@ -64,7 +64,7 @@ export const DIMENSIONS: DimensionDefinition[] = [
   { id: 'week', label: '周', description: '游戏开始周', grain: 'run', sources: ['runs', 'cards', 'relics', 'encounters', 'floors', 'players', 'imported'] },
   { id: 'entity', label: '实体', description: '卡牌、遗物或遭遇战标识', grain: 'event', sources: ['cards', 'relics', 'encounters'] },
   { id: 'floor', label: '楼层', description: '选择、获取、节点或遭遇战所在楼层', grain: 'event', sources: ['cards', 'relics', 'encounters', 'floors'] },
-  { id: 'act', label: '幕', description: '节点所在幕', grain: 'event', sources: ['encounters', 'floors'] },
+  { id: 'act', label: '阶段', description: '节点所在阶段', grain: 'event', sources: ['encounters', 'floors'] },
   { id: 'room_type', label: '房间类型', description: '地图节点的房间类型', grain: 'event', sources: ['floors'] },
   { id: 'player_position', label: '玩家位次', description: '多人队伍中的记录位次', grain: 'player', sources: ['players'] }
 ];
@@ -199,7 +199,7 @@ function dimensionValue(row: SourceRow, id: string, source: QueryDataSource): Di
     return result(raw, zhEntity(raw, category));
   }
   if (id === 'floor') return result(String(row.floor || 0), `${row.floor || 0} 层`);
-  if (id === 'act') return result(String(row.act || 0), `第 ${row.act || 0} 幕`);
+  if (id === 'act') return result(String(row.act || 0), `第 ${row.act || 0} 阶段`);
   if (id === 'room_type') {
     const raw = String(row.event?.type || 'unknown').toLowerCase();
     return result(raw, zhMapType(raw));

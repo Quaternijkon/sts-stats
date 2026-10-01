@@ -1,740 +1,282 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Star } from "lucide-react";
-import type { NormalizedRunV2, TimelinePoint } from "../../Engine/domain/types";
-import {
-  zhCharacter,
-  zhEntity,
-  zhMapType,
-  zhRef,
-} from "../../Engine/domain/i18n";
-import { decisionTimeline } from "../../Engine/domain/analytics";
+import type { AnalysisResult, NormalizedRunV2 } from "../../Engine/domain/types";
+import type { RunPageResponse } from "../../Engine/domain/runPages";
+import { EMPTY_FILTER } from "../../Engine/domain/schemas";
+import { zhCharacter, zhEntity, zhGameMode, zhStatus } from "../../Engine/domain/i18n";
 import { useAnalysis } from "../state/useAnalysis";
 import { useAppStore } from "../state/appStore";
-import {
-  Card,
-  EmptyState,
-  ErrorState,
-  MetricGrid,
-  MetricTile,
-  ObjectNumericCell,
-} from "../components/UI";
+import { Card, EmptyState, ErrorState, MetricGrid, MetricTile, ObjectNumericCell } from "../components/UI";
 import { characterColor, formatValue } from "../styles/theme";
 import { platform } from "../services/platform";
+import { analysisClient } from "../worker/client";
+import type { GameVersion } from "../services/models";
+import { InventoryCards, InventoryIds, NodeDetails } from "./runs/NodeDetails";
+import { TimelineChart, type ReplaySeries } from "./runs/TimelineChart";
+import { finalHealth, isCoopRun, rawExportName, recordedTotal, recordedValue, withHealthChanges } from "./runs/replay";
 
-const statusLabel = (s: string) =>
-  s === "win" ? "胜利" : s === "loss" ? "失败" : "放弃";
+const PAGE_SIZE = 100;
+type RunListState = {
+  search: string;
+  onlyFavorites: boolean;
+  offset: number;
+  sort: { field: string; direction: string };
+  filterKey: string;
+  revision: number;
+};
+// Exactly four runtime views: two games, each with a solo and a coop list.
+const runListStates = new Map<string, RunListState>();
 export function RunsPage({ coop = false }: { coop?: boolean }) {
-  const { favorites, toggleFavorite, openRun } = useAppStore();
-  const [search, setSearch] = useState("");
-  const [onlyFavorites, setOnlyFavorites] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [sort, setSort] = useState({ field: "startTime", direction: "desc" });
-  const { data, error, loading } = useAnalysis<{
-    runs: NormalizedRunV2[];
-    total: number;
-    compositions?: any[];
-  }>({
-    op: "runPage",
-    coop,
-    search,
-    offset,
-    limit: 100,
-    sort,
+  const game = useAppStore((state) => state.game);
+  return <RunListPage key={`${game}/${coop}`} coop={coop} game={game} />;
+}
+
+function RunListPage({ coop, game }: { coop: boolean; game: GameVersion }) {
+  const { favorites, toggleFavorite, openRun, filter, revision } = useAppStore();
+  const filterKey = JSON.stringify(filter);
+  const viewKey = `${game}/${coop}`;
+  const saved = runListStates.get(viewKey);
+  const [search, setSearch] = useState(saved?.search ?? "");
+  const [onlyFavorites, setOnlyFavorites] = useState(saved?.onlyFavorites ?? false);
+  const [offset, setOffset] = useState(saved?.filterKey === filterKey && saved?.revision === revision ? saved.offset : 0);
+  const [sort, setSort] = useState(saved?.sort ?? { field: "startTime", direction: "desc" });
+  const scope = useRef({ filterKey, revision });
+  const { data, error, loading } = useAnalysis<RunPageResponse>({
+    op: "runPage", coop, search, offset, limit: PAGE_SIZE, sort,
     favorites: onlyFavorites ? favorites : null,
   });
   useEffect(() => {
-    setOffset(0);
-  }, [coop, search, onlyFavorites, sort]);
-  if (error) return <ErrorState error={error} />;
+    if (scope.current.filterKey !== filterKey || scope.current.revision !== revision) setOffset(0);
+    scope.current = { filterKey, revision };
+  }, [filterKey, revision]);
+  useEffect(() => {
+    runListStates.set(viewKey, { search, onlyFavorites, offset, sort, filterKey, revision });
+  }, [viewKey, search, onlyFavorites, offset, sort, filterKey, revision]);
+  useEffect(() => {
+    if (!loading && data && offset >= data.total && offset > 0)
+      setOffset(Math.max(0, Math.ceil(data.total / PAGE_SIZE) - 1) * PAGE_SIZE);
+  }, [data, loading, offset]);
   function column(field: string, label: string) {
-    return (
-      <th>
-        <button
-          onClick={() =>
-            setSort({
-              field,
-              direction:
-                sort.field === field && sort.direction === "desc"
-                  ? "asc"
-                  : "desc",
-            })
-          }
-        >
-          {label}{" "}
-          {sort.field === field ? (sort.direction === "desc" ? "↓" : "↑") : ""}
-        </button>
-      </th>
-    );
+    return <th aria-sort={sort.field === field ? sort.direction === "desc" ? "descending" : "ascending" : "none"}>
+      <button onClick={() => {
+        setOffset(0);
+        setSort({ field, direction: sort.field === field && sort.direction === "desc" ? "asc" : "desc" });
+      }}>{label} {sort.field === field ? sort.direction === "desc" ? "↓" : "↑" : ""}</button>
+    </th>;
   }
-  return (
-    <>
-      <div className="page-tools">
-        <input
-          type="search"
-          aria-label="搜索记录"
-          placeholder="搜索日期、角色、种子或版本"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <label>
-          <input
-            type="checkbox"
-            checked={onlyFavorites}
-            onChange={(e) => setOnlyFavorites(e.target.checked)}
-          />
-          仅收藏
-        </label>
+  function numeric(run: NormalizedRunV2, field: string, format = "number") {
+    const value = run[field];
+    return <ObjectNumericCell value={typeof value === "number" ? value : null} format={format}
+      fill={data?.fills[run.id]?.[field]} heat={data?.heat[run.id]?.[field]}
+      help="柱长表示完整筛选结果内同列百分位；颜色只表示数值大小。" />;
+  }
+  const currentOffset = data?.offset ?? offset;
+  return <>
+    <div className="page-tools" data-analysis-ready={data && !loading ? "true" : undefined}>
+      <input type="search" aria-label="搜索记录" placeholder="搜索日期、角色、版本、种子或文件名"
+        value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} />
+      <label><input type="checkbox" checked={onlyFavorites}
+        onChange={(event) => { setOnlyFavorites(event.target.checked); setOffset(0); }} />仅收藏</label>
+      {(search || onlyFavorites) && <button onClick={() => {
+        setSearch(""); setOnlyFavorites(false); setOffset(0);
+      }}>清除筛选</button>}
+    </div>
+    {error && <ErrorState error={error} />}
+    <Card>
+      <div className="table-scroll run-table" aria-busy={loading}>
+        <table>
+          <thead><tr><th>收藏</th>{column("startTime", "日期")}
+            {column("character", coop ? "队伍" : "角色")}{column("ascension", "进阶")}
+            {column("status", "结果")}{column("floor", "楼层")}{column("runTime", "时长")}
+            {column("playerCount", "玩家")}{column("deckSize", "卡牌")}{column("relicCount", "遗物")}
+            {column("buildId", "版本")}{column("seed", "种子")}{column("fileName", "文件名")}
+          </tr></thead>
+          <tbody>{data?.runs.map((run) => <tr key={run.id}>
+            <td><button className="favorite-button" aria-label={favorites.includes(run.id) ? "取消收藏" : "收藏记录"}
+              aria-pressed={favorites.includes(run.id)} onClick={() => toggleFavorite(run.id)}>
+              <Star size={15} fill={favorites.includes(run.id) ? "var(--gold)" : "none"}
+                color={favorites.includes(run.id) ? "var(--gold)" : "var(--muted)"} />
+            </button></td>
+            <td><button className="object-link" onClick={() => openRun(run.id)}>
+              {formatValue(run.startTime, "date")}</button></td>
+            <td><button className="object-link" onClick={() => openRun(run.id)}>
+              {(coop ? run.players.map((player) => player.character) : [run.character]).map((character, index) =>
+                <span key={`${character}/${index}`} style={{ color: characterColor(character) }}>
+                  {index ? " + " : ""}{zhCharacter(character)}</span>)}
+            </button></td>
+            <td>{numeric(run, "ascension")}</td>
+            <td title={zhStatus(run.status)} style={{ color: run.status === "win" ? "var(--success)" :
+              run.status === "loss" ? "var(--damage)" : "var(--muted)" }}>{zhStatus(run.status)}</td>
+            <td>{numeric(run, "floor")}</td><td>{numeric(run, "runTime", "duration")}</td>
+            <td>{numeric(run, "playerCount")}</td><td>{numeric(run, "deckSize")}</td>
+            <td>{numeric(run, "relicCount")}</td><td title={run.buildId}>{run.buildId || "—"}</td>
+            <td title={run.seed}>{run.seed || "—"}</td><td title={run.fileName}>{run.fileName || "—"}</td>
+          </tr>)}</tbody>
+        </table>
+        {!data?.runs.length && <EmptyState>{loading ? "正在分析…" : "没有符合条件的记录"}</EmptyState>}
       </div>
-      {coop && data?.compositions && (
-        <Card title="队伍组合">
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>组合</th>
-                  <th>对局</th>
-                  <th>胜率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.compositions.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.label}</td>
-                    <td>{r.sample}</td>
-                    <td>
-                      <ObjectNumericCell
-                        value={r.winRate}
-                        format="percent"
-                        semantic="rate"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-      <Card>
-        <div className="table-scroll" aria-busy={loading}>
-          <table>
-            <thead>
-              <tr>
-                <th>收藏</th>
-                {column("startTime", "日期")}
-                {column("character", coop ? "玩家" : "角色")}
-                {column("ascension", "进阶")}
-                {column("status", "结果")}
-                {column("floor", "楼层")}
-                {column("runTime", "时长")}
-                {column("deckSize", "卡牌")}
-                {column("relicCount", "遗物")}
-                <th>版本</th>
-                <th>种子</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.runs.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <button
-                      className="favorite-button"
-                      aria-label={
-                        favorites.includes(r.id) ? "取消收藏" : "收藏记录"
-                      }
-                      onClick={() => toggleFavorite(r.id)}
-                    >
-                      <Star
-                        size={15}
-                        fill={favorites.includes(r.id) ? "var(--gold)" : "none"}
-                        color={
-                          favorites.includes(r.id)
-                            ? "var(--gold)"
-                            : "var(--muted)"
-                        }
-                      />
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      className="object-link"
-                      onClick={() => openRun(r.id)}
-                    >
-                      {formatValue(r.startTime, "date")}
-                    </button>
-                  </td>
-                  <td>
-                    {(coop
-                      ? r.players.map((p) => p.character)
-                      : [r.character]
-                    ).map((c, i) => (
-                      <span key={c + i} style={{ color: characterColor(c) }}>
-                        {i ? " + " : ""}
-                        {zhCharacter(c)}
-                      </span>
-                    ))}
-                  </td>
-                  <td>{r.ascension}</td>
-                  <td
-                    style={{
-                      color:
-                        r.status === "win"
-                          ? "var(--success)"
-                          : r.status === "loss"
-                            ? "var(--damage)"
-                            : "var(--muted)",
-                    }}
-                  >
-                    {statusLabel(r.status)}
-                  </td>
-                  <td>{r.floor}</td>
-                  <td>{formatValue(r.runTime, "duration")}</td>
-                  <td>{r.deckSize}</td>
-                  <td>{r.relicCount}</td>
-                  <td>{r.buildId || "—"}</td>
-                  <td>{r.seed || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!data?.runs.length && (
-            <EmptyState>
-              {loading ? "正在分析…" : "没有符合条件的记录"}
-            </EmptyState>
-          )}
-        </div>
-        <div className="pagination">
-          <span>{data?.total ?? 0} 局</span>
-          <button
-            disabled={!offset}
-            onClick={() => setOffset(Math.max(0, offset - 100))}
-          >
-            上一页
-          </button>
-          <span>{Math.floor(offset / 100) + 1}</span>
-          <button
-            disabled={offset + 100 >= (data?.total ?? 0)}
-            onClick={() => setOffset(offset + 100)}
-          >
-            下一页
-          </button>
-        </div>
-      </Card>
-    </>
-  );
-}
-type Series = { id: string; label: string; color: string; field: string };
-function recorded(p: TimelinePoint, field: string): number | null {
-  const v = p[field];
-  return p.recordedFields?.includes(field) &&
-    typeof v === "number" &&
-    Number.isFinite(v)
-    ? v
-    : null;
-}
-function TimelineChart({
-  points,
-  series,
-  selected,
-  onSelect,
-  title,
-}: {
-  points: TimelinePoint[];
-  series: Series[];
-  selected: number;
-  onSelect: (n: number) => void;
-  title: string;
-}) {
-  const [hover, setHover] = useState<number | null>(null);
-  const paths = useMemo(() => {
-    const values = points.flatMap((p) =>
-      series.flatMap((s) => {
-        const v = recorded(p, s.field);
-        return v == null ? [] : [v];
-      }),
-    );
-    const max = Math.max(1, ...values);
-    const min = Math.min(0, ...values);
-    const y = (v: number) => 180 - ((v - min) / (max - min)) * 155;
-    const x = (i: number) => 35 + (i / Math.max(1, points.length - 1)) * 710;
-    return {
-      max,
-      min,
-      x,
-      y,
-      items: series.map((s) => {
-        const segments: string[] = [];
-        let segment: number[] = [];
-        const close = () => {
-          if (segment.length) {
-            const line = segment
-              .map(
-                (i, j) =>
-                  `${j ? "L" : "M"}${x(i)},${y(recorded(points[i], s.field)!)}`,
-              )
-              .join(" ");
-            const first = segment[0],
-              last = segment[segment.length - 1];
-            segments.push(line + ` L${x(last)},${y(0)} L${x(first)},${y(0)} Z`);
-            segment = [];
-          }
-        };
-        points.forEach((p, i) => {
-          if (recorded(p, s.field) == null) {
-            close();
-            return;
-          }
-          if (i && p.floor !== points[i - 1].floor + 1) close();
-          segment.push(i);
-        });
-        close();
-        return { ...s, segments };
-      }),
-    };
-  }, [points, series]);
-  const focus = hover ?? selected;
-  const point = points[focus];
-  return (
-    <Card title={title}>
-      <div className="timeline-chart">
-        <svg
-          viewBox="0 0 780 210"
-          aria-label={title}
-          role="img"
-          onMouseLeave={() => setHover(null)}
-        >
-          <line x1="35" y1="180" x2="745" y2="180" stroke="var(--border)" />
-          <text x="0" y="25" fill="var(--muted)" fontSize="10">
-            {formatValue(paths.max)}
-          </text>
-          <text x="0" y="184" fill="var(--muted)" fontSize="10">
-            {formatValue(paths.min)}
-          </text>
-          {paths.items.map((s) => (
-            <g key={s.id}>
-              {s.segments.map((path, i) => (
-                <path
-                  key={i}
-                  d={path}
-                  fill={s.color}
-                  fillOpacity=".10"
-                  stroke={s.color}
-                  strokeWidth="1.5"
-                />
-              ))}
-              {points.map((p, i) => {
-                const v = recorded(p, s.field);
-                return v != null ? (
-                  <circle
-                    key={i}
-                    cx={paths.x(i)}
-                    cy={paths.y(v)}
-                    r={3}
-                    fill={s.color}
-                    opacity={focus === i ? 1 : 0.7}
-                    stroke={focus === i ? "var(--text)" : "none"}
-                    strokeWidth={1}
-                  />
-                ) : null;
-              })}
-            </g>
-          ))}
-          {point && (
-            <line
-              x1={paths.x(focus)}
-              x2={paths.x(focus)}
-              y1="15"
-              y2="180"
-              stroke="var(--muted)"
-              strokeDasharray="3 3"
-            />
-          )}
-          {points.map((p, i) => (
-            <rect
-              key={i}
-              x={paths.x(i) - 710 / Math.max(1, points.length - 1) / 2}
-              y="10"
-              width={Math.max(12, 710 / Math.max(1, points.length - 1))}
-              height="180"
-              fill="transparent"
-              tabIndex={0}
-              role="button"
-              aria-label={`${p.floor} 层 ${p.label}`}
-              onFocus={() => setHover(i)}
-              onBlur={() => setHover(null)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(i);
-                }
-              }}
-              onMouseEnter={() => setHover(i)}
-              onClick={() => onSelect(i)}
-            >
-              <title>
-                {p.floor} · {p.label}\n
-                {series
-                  .map((s) => `${s.label} ${formatValue(recorded(p, s.field))}`)
-                  .join("\n")}
-              </title>
-            </rect>
-          ))}
-        </svg>
-      </div>
-      <div className="legend">
-        {series.map((s) => (
-          <span key={s.id}>
-            <i style={{ background: s.color }} />
-            {s.label} {point ? formatValue(recorded(point, s.field)) : "—"}
-          </span>
-        ))}
-        <span>
-          {point ? `${point.floor} · ${point.label}` : "没有已记录节点"}
-        </span>
+      <div className="pagination">
+        <span>{data?.total ?? 0} 局</span>
+        <button disabled={loading || !currentOffset} onClick={() => setOffset(Math.max(0, currentOffset - PAGE_SIZE))}>上一页</button>
+        <span>{data?.total ? Math.floor(currentOffset / PAGE_SIZE) + 1 : 0} / {Math.ceil((data?.total ?? 0) / PAGE_SIZE)}</span>
+        <button disabled={loading || currentOffset + PAGE_SIZE >= (data?.total ?? 0)}
+          onClick={() => setOffset(currentOffset + PAGE_SIZE)}>下一页</button>
       </div>
     </Card>
-  );
+    {coop && !!data?.compositions?.length && <Card title="队伍组合" help="按完整筛选结果汇总；胜率为胜利局数 ÷ 非放弃局数。">
+      <div className="table-scroll run-table"><table>
+        <thead><tr><th>组合</th><th>对局</th><th>已完成</th><th>胜率</th></tr></thead>
+        <tbody>{data.compositions.map((row) => <tr key={row.id}><td>{row.label}</td>
+          <td><ObjectNumericCell value={row.sample} fill={row.fills?.sample} heat={row.heat?.sample} /></td>
+          <td>{formatValue(row.completed)}</td><td><ObjectNumericCell value={row.winRate}
+            format="percent" semantic="rate" help="胜利局数 ÷ 非放弃局数；没有已完成对局时为—。" /></td>
+        </tr>)}</tbody>
+      </table></div>
+    </Card>}
+    {coop && !!data?.telemetry?.length && <Card title="玩家记录"
+      help="显示当前页对局的所有玩家。低生命节点为已记录生命 ÷ 最大生命 < 25%；未知指标显示—。承伤与回复为已记录节点之和。">
+      <div className="table-scroll run-table"><table>
+        <thead><tr><th>对局</th><th>玩家</th><th>角色</th><th>节点</th><th>承伤</th><th>回复</th><th>低生命节点</th></tr></thead>
+        <tbody>{data.telemetry.map((row) => <tr key={row.id}>
+          <td><button className="object-link" onClick={() => openRun(row.runId)}>{row.runId}</button></td>
+          <td>{row.position}</td><td style={{ color: characterColor(row.characterId) }}>{row.character}</td>
+          {(["nodes", "damage", "healed", "lowHpNodes"] as const).map((field) => <td key={field}>
+            <ObjectNumericCell value={row[field]} fill={row.fills?.[field]} heat={row.heat?.[field]}
+              help={field === "lowHpNodes" ? `生命比例低于25%的已记录节点；${row.hpSamples}个节点可评估。` :
+                field === "damage" ? `${row.damageSamples}个节点记录了承伤。` : field === "healed" ?
+                  `${row.healedSamples}个节点记录了回复。` : "存档实际记录的节点数。"} />
+          </td>)}
+        </tr>)}</tbody>
+      </table></div>
+    </Card>}
+  </>;
 }
-const hpSeries: Series[] = [
+
+const hpSeries: ReplaySeries[] = [
   { id: "hp", label: "当前生命", field: "hp", color: "var(--success)" },
   { id: "maxHp", label: "最大生命", field: "maxHp", color: "var(--choice)" },
 ];
-const changeSeries: Series[] = [
-  {
-    id: "hpLoss",
-    label: "生命净减少",
-    field: "hpLoss",
-    color: "var(--damage)",
-  },
-  {
-    id: "hpGain",
-    label: "生命净增加",
-    field: "hpGain",
-    color: "var(--sample)",
-  },
+const charts: { title: string; series: ReplaySeries[] }[] = [
+  { title: "生命", series: hpSeries },
+  { title: "生命变化", series: [
+    { id: "hpLoss", label: "生命净减少", field: "hpLoss", color: "var(--damage)" },
+    { id: "hpGain", label: "生命净增加", field: "hpGain", color: "var(--sample)" },
+  ] },
+  { title: "金币", series: [{ id: "gold", label: "金币", field: "gold", color: "var(--gold)" }] },
+  { title: "承伤", series: [{ id: "damageTaken", label: "承伤", field: "damageTaken", color: "var(--damage)" }] },
+  { title: "回复", series: [{ id: "hpHealed", label: "回复", field: "hpHealed", color: "var(--sample)" }] },
+  { title: "获得金币", series: [{ id: "goldGained", label: "获得金币", field: "goldGained", color: "var(--gold)" }] },
+  { title: "金币花费", series: [{ id: "goldSpent", label: "金币花费", field: "goldSpent", color: "var(--spent)" }] },
+  { title: "战斗回合", series: [{ id: "turns", label: "战斗回合", field: "turns", color: "var(--choice)" }] },
 ];
-const damageSeries: Series[] = [
-  {
-    id: "damageTaken",
-    label: "承伤",
-    field: "damageTaken",
-    color: "var(--damage)",
-  },
-  { id: "hpHealed", label: "回复", field: "hpHealed", color: "var(--sample)" },
-];
-const goldSeries: Series[] = [
-  { id: "gold", label: "金币", field: "gold", color: "var(--gold)" },
-  {
-    id: "goldSpent",
-    label: "金币花费",
-    field: "goldSpent",
-    color: "var(--spent)",
-  },
-];
-const turnsSeries: Series[] = [
-  { id: "turns", label: "战斗回合", field: "turns", color: "var(--choice)" },
-];
+
+function RunBaseline({ run }: { run: NormalizedRunV2 }) {
+  const { data, loading, error } = useAnalysis<AnalysisResult>({
+    op: "query", filter: { characters: [run.character], ascensions: [run.ascension] },
+    query: { id: "run-baseline", dataSource: "runs", metricIds: ["sample", "win_rate", "avg_floor", "avg_duration"],
+      dimensionIds: [], filter: EMPTY_FILTER, sort: [], limit: 1, visualization: "table" },
+  });
+  const row = data?.rows[0];
+  const value = (field: string) => typeof row?.values[field] === "number" ? row.values[field] as number : null;
+  return <Card title="同角色、同进阶基准"
+    help="保留当前日期、版本、模式及其他筛选条件，限定为同角色同进阶的单人记录。胜率不计放弃局。">
+    {error ? <ErrorState error={error} /> : !row ? <EmptyState>{loading ? "正在分析…" : "没有符合条件的记录"}</EmptyState> :
+      <div className="table-scroll" aria-busy={loading}><table>
+        <thead><tr><th>角色</th><th>进阶</th><th>对局</th><th>胜率</th><th>平均到达层</th><th>平均局时</th></tr></thead>
+        <tbody><tr><td style={{ color: characterColor(run.character) }}>{zhCharacter(run.character)}</td><td>A{run.ascension}</td>
+          <td>{formatValue(value("sample"))}</td><td><ObjectNumericCell value={value("win_rate")} format="percent" semantic="rate" /></td>
+          <td>{formatValue(value("avg_floor"))}</td><td>{formatValue(value("avg_duration"), "duration")}</td>
+        </tr></tbody>
+      </table></div>}
+  </Card>;
+}
+
+function RawJsonCard({ id }: { id: string }) {
+  const { data, error, loading } = useAnalysis<string>(
+    { op: "runText", id, format: "raw" }, { unfiltered: true },
+  );
+  return <Card title="原始 JSON" className="run-raw-json">
+    {error ? <ErrorState error={error} /> : data == null ?
+      <EmptyState>{loading ? "正在读取…" : "没有原始记录"}</EmptyState> : <pre>{data}</pre>}
+  </Card>;
+}
+
 export function RunDetailPage({ id }: { id: string }) {
-  const { favorites, toggleFavorite, openObject } = useAppStore();
+  const { favorites, toggleFavorite, game } = useAppStore();
   const [player, setPlayer] = useState(0);
   const [selected, setSelected] = useState(0);
-  const { data, error, loading } = useAnalysis<NormalizedRunV2>(
-    { op: "run", id, player },
-    { unfiltered: true },
-  );
-  useEffect(() => {
-    setPlayer(0);
-    setSelected(0);
-  }, [id]);
-  const points = useMemo(() => {
-    const input = data?.timeline ?? [];
-    return input.map((p, i) => {
-      const current = recorded(p, "hp"),
-        previous = i ? recorded(input[i - 1], "hp") : null;
-      if (
-        current == null ||
-        previous == null ||
-        p.floor !== input[i - 1].floor + 1
-      )
-        return p;
-      return {
-        ...p,
-        hpLoss: Math.max(0, previous - current),
-        hpGain: Math.max(0, current - previous),
-        recordedFields: [...(p.recordedFields ?? []), "hpLoss", "hpGain"],
-      };
-    });
-  }, [data]);
+  const [rawVisible, setRawVisible] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const { data, error, loading } = useAnalysis<NormalizedRunV2>({ op: "run", id, player }, { unfiltered: true });
+  useEffect(() => { setPlayer(0); setSelected(0); setRawVisible(false); setExportError(null); }, [id]);
+  const points = useMemo(() => withHealthChanges(data?.timeline ?? []), [data]);
+  async function exportRun(format: "raw" | "normalized", fileName: string) {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const text = await analysisClient(game).call<string>({ op: "runText", id, player, format });
+      await platform.exportText(fileName, text);
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setExporting(false);
+    }
+  }
   if (error) return <ErrorState error={error} />;
-  if (!data)
+  if (!data || data.id !== id || (typeof data.replayPlayer === "number" && data.replayPlayer !== player))
     return <EmptyState>{loading ? "正在分析…" : "未找到记录"}</EmptyState>;
   const active = data.players[player] ?? data.players[0];
+  if (!active) return <EmptyState>没有玩家记录</EmptyState>;
+  const coop = isCoopRun(data);
+  const health = finalHealth(data, player);
   const point = points[Math.min(selected, Math.max(0, points.length - 1))];
-  const deck = new Map<
-    string,
-    { id: string; upgrade: number; count: number; label: string }
-  >();
-  for (const c of active.deck) {
-    const key = c.id + ":" + c.upgradeLevel;
-    const prev = deck.get(key);
-    deck.set(key, {
-      id: c.id,
-      upgrade: c.upgradeLevel,
-      count: (prev?.count ?? 0) + 1,
-      label: zhEntity(c.id, "cards", c.id),
-    });
-  }
-  const relics = new Map<string, number>();
-  for (const r of active.relics) relics.set(r.id, (relics.get(r.id) ?? 0) + 1);
-  const events = decisionTimeline(data.timeline) as {
-    floor: number;
-    type: string;
-    title: string;
-    detail: string;
-  }[];
-  return (
-    <>
-      <div className="page-tools">
-        <span style={{ color: characterColor(active.character) }}>
-          {zhCharacter(active.character)}
-        </span>
-        <span>
-          {formatValue(data.startTime, "date")} · {statusLabel(data.status)}
-        </span>
-        <button onClick={() => toggleFavorite(id)}>
-          <Star
-            size={15}
-            fill={favorites.includes(id) ? "var(--gold)" : "none"}
-          />
-          {favorites.includes(id) ? "已收藏" : "收藏"}
-        </button>
-        {data.players.length > 1 && (
-          <label>
-            玩家
-            <select
-              value={player}
-              onChange={(e) => {
-                setPlayer(Number(e.target.value));
-                setSelected(0);
-              }}
-            >
-              {data.players.map((p, i) => (
-                <option key={i} value={i}>
-                  {i + 1} · {zhCharacter(p.character)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button
-          onClick={() =>
-            platform.exportText(
-              "run-detail.json",
-              JSON.stringify(data, null, 2),
-            )
-          }
-        >
-          导出记录
-        </button>
-      </div>
-      <MetricGrid>
-        <MetricTile label="进阶" value={data.ascension} kind="floor" />
-        <MetricTile label="楼层" value={data.floor} kind="floor" />
-        <MetricTile
-          label="时长"
-          value={formatValue(data.runTime, "duration")}
-          kind="time"
-        />
-        <MetricTile
-          label="最终生命"
-          value={
-            player === 0
-              ? `${data.finalHp} / ${data.maxHp}`
-              : points.length
-                ? `${points.at(-1)!.hp} / ${points.at(-1)!.maxHp}`
-                : "—"
-          }
-          kind="health"
-        />
-        <MetricTile label="最终卡牌" value={active.deck.length} kind="choice" />
-        <MetricTile label="最终遗物" value={active.relics.length} kind="gold" />
-      </MetricGrid>
-      <div className="chart-grid">
-        {[hpSeries, changeSeries, damageSeries, goldSeries, turnsSeries].map(
-          (series, i) =>
-            points.some((p) =>
-              series.some((s) => recorded(p, s.field) != null),
-            ) ? (
-              <TimelineChart
-                key={i}
-                points={points}
-                series={series}
-                selected={selected}
-                onSelect={setSelected}
-                title={
-                  ["生命", "生命变化", "承伤与回复", "金币", "战斗回合"][i]
-                }
-              />
-            ) : null,
-        )}
-      </div>
-      {point && (
-        <Card title={`${point.floor} · ${point.label}`}>
-          <div className="action-row">
-            <button
-              disabled={!selected}
-              onClick={() => setSelected(Math.max(0, selected - 1))}
-            >
-              上一节点
-            </button>
-            <select
-              value={selected}
-              onChange={(e) => setSelected(Number(e.target.value))}
-              aria-label="复盘节点"
-            >
-              {points.map((p, i) => (
-                <option key={i} value={i}>
-                  {p.floor} · {p.label}
-                </option>
-              ))}
-            </select>
-            <button
-              disabled={selected >= points.length - 1}
-              onClick={() => setSelected(selected + 1)}
-            >
-              下一节点
-            </button>
-          </div>
-          <dl className="details">
-            <dt>房间</dt>
-            <dd>{zhMapType(point.type)}</dd>
-            <dt>节点指标</dt>
-            <dd>
-              {[
-                ["hp", "生命"],
-                ["maxHp", "最大生命"],
-                ["gold", "金币"],
-                ["damageTaken", "承伤"],
-                ["hpHealed", "回复"],
-                ["goldGained", "获得金币"],
-                ["goldSpent", "花费金币"],
-                ["turns", "回合"],
-              ]
-                .filter(([key]) => recorded(point, key) != null)
-                .map(
-                  ([key, label]) =>
-                    `${label} ${formatValue(recorded(point, key))}`,
-                )
-                .join(" · ") || "—"}
-            </dd>
-            <dt>选择</dt>
-            <dd>
-              <div className="inventory">
-                {(
-                  ["cardChoices", "relicChoices", "potionChoices"] as const
-                ).flatMap((key, idx) =>
-                  (point[key] ?? []).map((c) => (
-                    <button
-                      key={key + c.id}
-                      onClick={() =>
-                        openObject(
-                          (["card", "relic", "potion"] as const)[idx],
-                          c.id,
-                        )
-                      }
-                      title={c.picked ? "选取" : "跳过"}
-                      className={c.picked ? "picked-choice" : ""}
-                    >
-                      {zhEntity(
-                        c.id,
-                        ["cards", "relics", "potions"][idx],
-                        c.id,
-                      )}{" "}
-                      · {c.picked ? "选取" : "跳过"}
-                    </button>
-                  )),
-                )}
-              </div>
-              {(point.eventChoices ?? []).map((c, i) => (
-                <span key={i}>{zhRef(c.title)} </span>
-              ))}
-              {(point.ancientChoices ?? [])
-                .filter((c) => c.chosen)
-                .map((c, i) => (
-                  <span key={i}>{zhRef(c.title)} </span>
-                ))}
-            </dd>
-            <dt>节点记录</dt>
-            <dd>
-              {events
-                .filter((e) => e.floor === point.floor)
-                .map((e, i) => (
-                  <p key={i}>
-                    {e.title} · {e.detail}
-                  </p>
-                ))}
-            </dd>
-          </dl>
-        </Card>
-      )}
-      <Card title={`最终牌组 ${active.deck.length}`}>
-        <div className="inventory">
-          {[...deck.values()].map((c) => (
-            <button
-              key={c.id + ":" + c.upgrade}
-              style={{ color: "var(--choice)" }}
-              onClick={() => openObject("card", c.id)}
-            >
-              {c.label}
-              {c.upgrade ? ` +${c.upgrade}` : ""}
-              {c.count > 1 ? ` ×${c.count}` : ""}
-            </button>
-          ))}
-        </div>
-      </Card>
-      <Card title={`最终遗物 ${active.relics.length}`}>
-        <div className="inventory">
-          {[...relics].map(([id, count]) => (
-            <button
-              key={id}
-              style={{ color: "var(--gold)" }}
-              onClick={() => openObject("relic", id)}
-            >
-              {zhEntity(id, "relics", id)}
-              {count > 1 ? ` ×${count}` : ""}
-            </button>
-          ))}
-        </div>
-      </Card>
-      {active.potions.length > 0 && (
-        <Card title="最终药水">
-          <div className="inventory">
-            {active.potions.map((id, i) => (
-              <button key={id + i} onClick={() => openObject("potion", id)}>
-                {zhEntity(id, "potions", id)}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
-      <Card title="对局信息">
-        <dl className="details">
-          <dt>种子</dt>
-          <dd>{data.seed || "—"}</dd>
-          <dt>版本</dt>
-          <dd>{data.buildId || "—"}</dd>
-          <dt>模式</dt>
-          <dd>{data.gameMode}</dd>
-          <dt>击败者</dt>
-          <dd>
-            {data.killedBy
-              ? zhEntity(data.killedBy, "monsters", data.killedBy)
-              : "—"}
-          </dd>
-          <dt>来源文件</dt>
-          <dd>{data.fileName}</dd>
-        </dl>
-      </Card>
-    </>
-  );
+  const damage = recordedTotal(points, "damageTaken");
+  return <>
+    <div className="page-tools" data-analysis-ready={!loading ? "true" : undefined}>
+      <span style={{ color: characterColor(active.character) }}>{zhCharacter(active.character)} · A{data.ascension}</span>
+      <span>{formatValue(data.startTime, "date")} · {zhStatus(data.status)}</span>
+      <button aria-pressed={favorites.includes(id)} onClick={() => toggleFavorite(id)}>
+        <Star size={15} fill={favorites.includes(id) ? "var(--gold)" : "none"} />{favorites.includes(id) ? "已收藏" : "收藏"}
+      </button>
+      {data.players.length > 1 && <label>玩家视角<select aria-label="玩家视角" value={player} onChange={(event) => {
+        setPlayer(Number(event.target.value)); setSelected(0);
+      }}>{data.players.map((item, index) => <option key={`${item.id}/${index}`} value={index}>
+        玩家 {index + 1} · {zhCharacter(item.character)}</option>)}</select></label>}
+      <button aria-expanded={rawVisible} onClick={() => setRawVisible(!rawVisible)}>原始 JSON</button>
+      <button disabled={exporting} onClick={() => void exportRun("raw", rawExportName(data.fileName))}>导出原始存档</button>
+      <button disabled={exporting} onClick={() => void exportRun("normalized", "run-detail.json")}>导出记录</button>
+    </div>
+    {exportError && <ErrorState error={exportError} />}
+    <MetricGrid>
+      <MetricTile label="结局" value={zhStatus(data.status)} kind={data.status === "win" ? "success" : data.status === "loss" ? "damage" : "sample"} />
+      <MetricTile label="楼层" value={data.floor} kind="floor" />
+      <MetricTile label="时长" value={formatValue(data.runTime, "duration")} kind="time" />
+      <MetricTile label="承伤" value={formatValue(damage)} kind="damage" help="当前玩家已记录节点的承伤总量；没有记录时为—。" />
+      <MetricTile label="最终生命" value={`${formatValue(health.hp)} / ${formatValue(health.maxHp)}`} kind="health" />
+      <MetricTile label="最终卡牌" value={active.deck.length} kind="choice" />
+    </MetricGrid>
+    <div className="chart-grid">
+      {charts.filter((chart) => points.some((sample) => chart.series.some((series) => recordedValue(sample, series.field) != null)))
+        .map((chart) => <TimelineChart key={chart.title} title={chart.title} series={chart.series}
+          points={points} selected={selected} onSelect={setSelected} />)}
+    </div>
+    {!points.length && <Card title="复盘"><EmptyState>存档没有节点记录</EmptyState></Card>}
+    {point && <NodeDetails point={point} allowsAnalysis={!coop} />}
+    <Card title={`最终牌组 ${active.deck.length}`}><InventoryCards cards={active.deck} allowsAnalysis={!coop} /></Card>
+    <Card title={`最终遗物 ${active.relics.length}`}><InventoryIds ids={active.relics.map((relic) => relic.id)} kind="relic" allowsAnalysis={!coop} /></Card>
+    {!!active.potions.length && <Card title={`最终药水 ${active.potions.length}`}><InventoryIds ids={active.potions} kind="potion" allowsAnalysis={!coop} /></Card>}
+    {!coop && <RunBaseline run={data} />}
+    <Card title="对局信息"><dl className="details">
+      <dt>种子</dt><dd>{data.seed || "—"}</dd><dt>版本</dt><dd>{data.buildId || "—"}</dd>
+      <dt>模式</dt><dd>{zhGameMode(data.gameMode) || "—"}</dd><dt>玩家</dt><dd>{data.players.length}</dd>
+      <dt>击败者</dt><dd>{data.killedBy ? zhEntity(data.killedBy, null, data.killedBy) : "—"}</dd>
+      {!!data.acts?.length && <><dt>路线</dt><dd>{data.acts.map((act) => zhEntity(act, "acts", act)).join(" · ")}</dd></>}
+      {!!data.modifiers?.length && <><dt>调整项</dt><dd>{data.modifiers.map((modifier) => zhEntity(modifier, "modifiers", modifier)).join(" · ")}</dd></>}
+      {!!active.badges.length && <><dt>徽章</dt><dd>{active.badges.map((badge) => zhEntity(badge, "badges", badge)).join(" · ")}</dd></>}
+      <dt>来源文件</dt><dd>{data.fileName}</dd>
+    </dl></Card>
+    {rawVisible && <RawJsonCard id={id} />}
+  </>;
 }

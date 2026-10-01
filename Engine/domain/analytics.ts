@@ -98,8 +98,7 @@ export function dashboardHistory(runs) {
       else if (run.status === 'win') group.wins += 1;
       else group.losses += 1;
       group.items.push(entry);
-      // The overall history is scrollable; keep every filtered record.
-
+      // Every history group scrolls horizontally; keep all filtered records.
     }
   }
   return { overall, characters: [...groups.values()], limit };

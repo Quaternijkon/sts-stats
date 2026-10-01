@@ -11,53 +11,88 @@ export function useAnalysis<T>(
   const filter = useAppStore((s) => s.filter);
   const ready = useAppStore((s) => s.ready);
   const group = useId();
-  const cache = useRef(new Map<string, T>());
+  const cache = useRef(new Map<string, { data: T; bytes: number }>());
+  const cacheBytes = useRef(0);
   const identity = useRef("");
+  const dataIdentity = `${game}/${revision}`;
   const [retry, setRetry] = useState(0);
-  const [state, setState] = useState<{
-    data: T | null;
-    loading: boolean;
-    error: string | null;
-  }>({ data: null, loading: true, error: null });
   const key = JSON.stringify({
     ...request,
     ...(options.unfiltered
       ? {}
       : { filter: { ...filter, ...((request.filter as object) ?? {}) } }),
   });
+  const [state, setState] = useState<{
+    data: T | null;
+    loading: boolean;
+    error: string | null;
+    identity: string;
+    requestKey: string;
+    resolvedRequestKey: string | null;
+  }>({ data: null, loading: true, error: null, identity: dataIdentity, requestKey: key, resolvedRequestKey: null });
   useEffect(() => {
-    if (!ready) return;
+    if (!ready) {
+      cache.current.clear();
+      cacheBytes.current = 0;
+      identity.current = "";
+      setState({ data: null, loading: true, error: null, identity: dataIdentity, requestKey: key, resolvedRequestKey: null });
+      return;
+    }
     const version = `${game}/${revision}/${retry}`;
     if (identity.current !== version) {
       identity.current = version;
       cache.current.clear();
+      cacheBytes.current = 0;
     }
     if (cache.current.has(key)) {
-      const data = cache.current.get(key)!;
+      const entry = cache.current.get(key)!;
       cache.current.delete(key);
-      cache.current.set(key, data);
-      setState({ data, loading: false, error: null });
+      cache.current.set(key, entry);
+      analysisClient(game).cancelGroup(group);
+      setState({ data: entry.data, loading: false, error: null, identity: dataIdentity, requestKey: key, resolvedRequestKey: key });
       return;
     }
     let active = true;
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({
+      data: s.identity === dataIdentity ? s.data : null,
+      resolvedRequestKey: s.identity === dataIdentity ? s.resolvedRequestKey : null,
+      loading: true, error: null, identity: dataIdentity, requestKey: key,
+    }));
     analysisClient(game)
-      .call<T>(JSON.parse(key), group)
-      .then((data) => {
+      .callMeasured<T>(JSON.parse(key), group)
+      .then(({ result: data, bytes: measuredBytes }) => {
         if (active) {
-          cache.current.set(key, data);
-          while (cache.current.size > 6)
-            cache.current.delete(cache.current.keys().next().value!);
-          setState({ data, loading: false, error: null });
+          const bytes = measuredBytes + key.length * 2;
+          if (measuredBytes > 0 && bytes <= 8 * 1024 * 1024) {
+            cache.current.set(key, { data, bytes });
+            cacheBytes.current += bytes;
+            while (cache.current.size > 6 || cacheBytes.current > 8 * 1024 * 1024) {
+              const oldest = cache.current.keys().next().value!;
+              cacheBytes.current -= cache.current.get(oldest)!.bytes;
+              cache.current.delete(oldest);
+            }
+          }
+          setState({ data, loading: false, error: null, identity: dataIdentity, requestKey: key, resolvedRequestKey: key });
         }
       })
       .catch((error) => {
         if (active)
-          setState({ data: null, loading: false, error: error.message });
+          setState({ data: null, loading: false, error: error.message, identity: dataIdentity, requestKey: key, resolvedRequestKey: null });
       });
     return () => {
       active = false;
+      analysisClient(game).cancelGroup(group);
     };
-  }, [game, revision, key, retry, ready, group]);
-  return { ...state, reload: () => setRetry((n) => n + 1) };
+  }, [game, revision, key, retry, ready, group, dataIdentity]);
+  const current = ready && state.identity === dataIdentity;
+  const currentRequest = current && state.requestKey === key;
+  return {
+    data: current ? state.data : null,
+    loading: !currentRequest || state.loading,
+    error: currentRequest ? state.error : null,
+    requestKey: key,
+    resolvedRequestKey: current ? state.resolvedRequestKey : null,
+    isCurrent: current && state.resolvedRequestKey === key,
+    reload: () => setRetry((n) => n + 1),
+  };
 }

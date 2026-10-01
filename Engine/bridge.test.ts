@@ -113,3 +113,19 @@ describe('single-player statistics boundary', () => {
     expect(call('career').summary).toMatchObject({ total: 0, avgDamageTaken: 0, maxWinStreak: 0 });
   });
 });
+
+describe('run replay and pagination bridge', () => {
+  it('preserves imported player timelines when map records are absent', () => {
+    const value = run('normalized-replay', true, true);
+    const point = { floor: 1, act: 1, actFloor: 1, type: 'monster', label: 'ENCOUNTER.SYNTHETIC', hp: 20, maxHp: 80, gold: 30, damageTaken: 0, hpHealed: 0, goldGained: 0, goldSpent: 0, recordedFields: ['hp', 'maxHp'] };
+    value.playerTimelines = [[point], [{ ...point, hp: 40 }]];
+    call('load', { runs: [value], progress: null });
+    expect(call('run', { id: value.id, player: 1 })).toMatchObject({ replayPlayer: 1, timeline: [{ hp: 40 }] });
+    expect(call('run', { id: value.id, player: -1 })).toMatchObject({ replayPlayer: 0, timeline: [{ hp: 20 }] });
+    expect(JSON.parse(call('runText', { id: value.id, format: 'raw' }))).toEqual(value.raw);
+    expect(JSON.parse(call('runText', { id: value.id, player: 1, format: 'normalized' }))).toEqual(call('run', { id: value.id, player: 1 }));
+    expect(call('runPage', { coop: false }).total).toBe(0);
+    expect(call('runPage', { coop: true, search: 'normalized-replay', favorites: [value.id] })).toMatchObject({ total: 1, telemetryTotal: 2, compositions: [{ sample: 1 }] });
+    expect(call('runPage', { coop: true, favorites: [] })).toMatchObject({ total: 0, telemetry: [], compositions: [] });
+  });
+});

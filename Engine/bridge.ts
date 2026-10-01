@@ -9,11 +9,12 @@ import { analyzeCardArchetypes } from './domain/cardArchetypes';
 import { analyzeRestSites } from './domain/restSiteAnalysis';
 import { legacyEntityProfile, legacyAncients, legacyAncient } from './domain/objectLegacy';
 import { runMatchesDataItem } from './domain/dataItems';
-import { zhEntity, zhCharacter } from './domain/i18n';
+import { zhEntity } from './domain/i18n';
 import { UnifiedObjectRegistry } from './domain/objectAnalysis';
 import { OBJECT_KINDS } from './domain/objectTypes';
 import type { CareerProgress, NormalizedRunV2 } from './domain/types';
 import { setCurrentGame, setGameCharacters } from './domain/game';
+import { coopSummary, playerTimeline, runPage, runSummary } from './domain/runPages';
 let runs:NormalizedRunV2[] = [];
 let progress: CareerProgress | null = null;
 let objectRegistry: UnifiedObjectRegistry | null = null;
@@ -30,16 +31,32 @@ function objects(): UnifiedObjectRegistry {
 function isCoop(run:any): boolean {
   return run.isMultiplayer || run.playerCount > 1 || run.players.length > 1;
 }
+
+function runDetail(id: string, player: unknown) {
+  const run = runs.find(run => run.id === id);
+  if (!run) throw Error('未找到对局');
+  const index = typeof player === 'number' && Number.isInteger(player) && player >= 0 && player < run.players.length ? player : 0;
+  return {
+    ...run, replayPlayer: index,
+    players: run.players.map(player => ({
+      ...player,
+      deck: (player.deck || []).map(card => ({ ...card, label: zhEntity(card.id, 'cards', card.id) })),
+      relics: (player.relics || []).map(relic => ({ ...relic, label: zhEntity(relic.id, 'relics', relic.id) })),
+    })),
+    timeline: playerTimeline(run, index),
+  };
+}
+
 export function dispatch(input:string): string {
   const p = JSON.parse(input);
-  let selected = ['load', 'parse', 'catalog', 'run', 'csv', 'label', 'objects', 'object', 'cardPoolCache'].includes(p.op) ? [] : runs.filter(r=> isCoop(r) === (p.op === 'coop') && matchesFilter(r, {...EMPTY_FILTER, ...p.filter, party:'all'}));
+  let selected = ['load', 'parse', 'catalog', 'run', 'runText', 'csv', 'label', 'objects', 'object', 'cardPoolCache'].includes(p.op) ? [] : runs.filter(r=> isCoop(r) === (p.op === 'coop' || (p.op === 'runPage' && Boolean(p.coop))) && matchesFilter(r, {...EMPTY_FILTER, ...p.filter, party:'all'}));
   if(p.focus) selected = selected.filter(r=>runMatchesDataItem(r,p.focus));
   let result:any;
   switch(p.op) {
     case 'load': {
-      setCurrentGame(p.game);
       const nextRuns = p.runs.map(validateNormalizedRun);
       const nextProgress = p.progress == null ? null : validateCareerProgress(p.progress);
+      setCurrentGame(p.game);
       setGameCharacters([
         ...nextRuns.flatMap((run:any) => [run.character, ...(run.players || []).map((player:any) => player.character)]),
         ...(nextProgress?.characterStats || []).map((row:any) => row.character)
@@ -68,9 +85,15 @@ export function dispatch(input:string): string {
     case 'query': { const q=validateQuery({...p.query, filter:{...EMPTY_FILTER,...p.query?.filter,...p.filter,party:'solo'}}); result=q.dataSource==='career'?executeCareerQuery(selected,q):executeQuery(selected,q); break; }
     case 'dashboard': result={summary:analytics.summarizeRuns(selected),characters:analytics.characterStats(selected),rolling:analytics.rollingWinRate(selected),survival:analytics.survivalByFloor(selected),rest:analytics.restSiteStats(selected),ascensions:analytics.ascensionStats(selected),history:analytics.dashboardHistory(selected),playtime:analytics.dashboardPlaytime(selected,p.activityDays)}; break;
     case 'restAnalysis': result=analyzeRestSites(selected); break;
-    case 'runs': result=selected.sort((a,b)=>b.startTime-a.startTime).map(({raw,map,timeline,playerTimelines,...r})=>r); break;
-    case 'run': {const r=runs.find(r=>r.id===p.id); if(!r) throw Error('未找到对局'); result={...r,players:r.players.map(player=>({...player,deck:player.deck.map(c=>({...c,label:zhEntity(c.id,'cards',c.id)})),relics:player.relics.map(c=>({...c,label:zhEntity(c.id,'relics',c.id)}))})),timeline:parser.buildPlayerTimeline(r,p.player||0)};break;}
-    case 'coop': {const pool=selected; const groups=new Map<string,NormalizedRunV2[]>();const telemetry:any[]=[];for(const r of pool){const key=r.players.map(p=>zhCharacter(p.character)).sort().join(' + ');if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(r);r.players.forEach((player,index)=>{const points: any[]=r.playerTimelines?.[index]||parser.buildPlayerTimeline(r,index);telemetry.push({id:r.id+':'+index,runId:r.id,character:zhCharacter(player.character),position:index+1,lowHpNodes:points.filter(p=>p.maxHp>0&&p.hp/p.maxHp<.25).length,nodes:points.length,damage:points.reduce((n,p)=>n+p.damageTaken,0),healed:points.reduce((n,p)=>n+p.hpHealed,0)});});}result={runs:pool.map(({raw,map,timeline,playerTimelines,...r})=>r),telemetry,compositions:[...groups].map(([label,rs])=>({id:label,label,sample:rs.length,winRate:analytics.ratio(rs.filter(r=>r.win).length,rs.filter(r=>r.status!=='abandoned').length)}))};break;}
+    case 'runs': result=selected.sort((a,b)=>b.startTime-a.startTime).map(runSummary); break;
+    case 'runPage': result=runPage(selected,p); break;
+    case 'run': result=runDetail(p.id,p.player);break;
+    case 'runText': {
+      const run = runs.find(run => run.id === p.id);
+      if (!run) throw Error('未找到对局');
+      result=JSON.stringify(p.format==='normalized'?runDetail(p.id,p.player):run.raw,null,2);break;
+    }
+    case 'coop': result={runs:selected.map(runSummary),...coopSummary(selected)};break;
     case 'arena': result=analyzePreferenceArenaRuns(selected,p.scope||{}); break;
     case 'archetypes': result=analyzeCardArchetypes(selected,p.character||'Ironclad'); break;
     case 'entity': result=legacyEntityProfile(selected,p.kind,p.id,p.perspective);break;

@@ -26,17 +26,53 @@ export function validateDataset(value: unknown, game?: GameVersion): Dataset {
   )
     throw new Error("本地数据格式无效");
   const runs = d.runs.map(validateNormalizedRun);
-  if (game && runs.some((run) => run.gameVersion && run.gameVersion !== game))
+  if (game && runs.some((run) => detectedGame(run) !== game))
     throw new Error("数据属于另一个游戏，请返回首页选择对应游戏");
   if (new Set(runs.map((r) => r.id)).size !== runs.length)
     throw new Error("数据包含重复对局标识");
+  const manifest = stringMap(d.manifest, "文件清单");
+  const byID = new Set(runs.map((run) => run.id));
+  const legacyIDs = Object.fromEntries(
+    Object.keys(manifest)
+      .filter((path) => path.toLowerCase().endsWith(".run"))
+      .map((path) => [path, path.split(/[\\/]/).at(-1)!]),
+  );
+  const fileRunIDs = Object.fromEntries(
+    Object.entries(stringMap(d.fileRunIDs ?? legacyIDs, "文件对局映射"))
+      .filter(([, id]) => byID.has(id)),
+  );
+  const importMetadata = d.importMetadata ?? {};
+  if (!importMetadata || typeof importMetadata !== "object" || Array.isArray(importMetadata))
+    throw new Error("导入记录格式无效");
+  for (const meta of Object.values(importMetadata)) {
+    if (!meta || !Number.isFinite(meta.modifiedAt) || typeof meta.digest !== "string" ||
+      !Array.isArray(meta.versions) || meta.versions.some((version) => typeof version !== "string"))
+      throw new Error("导入记录格式无效");
+  }
+  const progress = d.progress == null ? null : validateCareerProgress(d.progress);
+  if (game === "sts1" && progress !== null)
+    throw new Error("生涯存档属于杀戮尖塔 2，请选择对应游戏");
   return {
-    ...d,
     runs,
-    progress: d.progress == null ? null : validateCareerProgress(d.progress),
-    manifest: d.manifest ?? {},
-    fileRunIDs: d.fileRunIDs ?? {},
+    progress,
+    source: d.source,
+    importedAt: d.importedAt,
+    manifest,
+    fileRunIDs,
+    importMetadata: structuredClone(importMetadata),
   };
+}
+function stringMap(value: unknown, label: string): Record<string, string> {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value) ||
+    Object.values(value).some((item) => typeof item !== "string"))
+    throw new Error(`${label}格式无效`);
+  return { ...value } as Record<string, string>;
+}
+function detectedGame(run: NormalizedRunV2): GameVersion {
+  if (run.gameVersion === "sts1" || run.gameVersion === "sts2") return run.gameVersion;
+  const raw = run.raw as Record<string, unknown> | undefined;
+  return raw?.play_id && raw.character_chosen && Array.isArray(raw.master_deck) ? "sts1" : "sts2";
 }
 function stable(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(stable).join(",") + "]";
@@ -73,7 +109,7 @@ async function runKey(run: NormalizedRunV2): Promise<string> {
             })),
             mode: run.gameMode,
           }
-        : run.raw,
+        : run.raw ?? run,
     ),
   );
 }
@@ -85,11 +121,14 @@ export async function prepareImport(
   source: string,
   game: GameVersion,
 ): Promise<Dataset> {
-  if (!files.length) throw new Error("所选位置没有 .run 或 progress.save 文件");
   if (files.filter((f) => f.name.toLowerCase() === "progress.save").length > 1)
     throw new Error("包含多个 progress.save，请选择单一账号或 Profile");
-  const sameSource = !previous.source || previous.source === source;
+  const sameSource = previous.source === source;
   const base = sameSource ? previous : emptyDataset();
+  if (base.runs.some((run) => detectedGame(run) !== game) || (game === "sts1" && base.progress))
+    throw new Error("数据属于另一个游戏，请选择对应游戏");
+  if (!files.length && !base.runs.length && !base.progress)
+    throw new Error("所选位置没有 .run 或 progress.save 文件");
   const next: Dataset = {
     ...base,
     source,
@@ -103,12 +142,21 @@ export async function prepareImport(
   const ids = new Map(base.runs.map((r) => [r.id, r]));
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     try {
+      if (!file.path || !Number.isFinite(file.modifiedAt) || file.modifiedAt < 0 ||
+        (!file.name.toLowerCase().endsWith(".run") && file.name.toLowerCase() !== "progress.save"))
+        throw new Error("不支持的存档文件");
+      if (file.name.toLowerCase() === "progress.save" && game !== "sts2")
+        throw new Error("这是二代生涯存档，请选择杀戮尖塔 2");
       const hash = await digest(file.text);
       if (next.manifest[file.path] === hash) continue;
       if (file.name.toLowerCase() === "progress.save") {
         next.progress = validateCareerProgress(parseProgressText(file.text));
       } else {
-        const raw = JSON.parse(file.text.trim());
+        const trimmed = file.text.trim();
+        const jsonStart = trimmed.indexOf("{");
+        const jsonEnd = trimmed.lastIndexOf("}");
+        const raw = JSON.parse(jsonStart >= 0 && jsonEnd > jsonStart
+          ? trimmed.slice(jsonStart, jsonEnd + 1) : trimmed);
         if (
           game === "sts1" &&
           Array.isArray(raw.players) &&
@@ -140,6 +188,8 @@ export async function prepareImport(
           const value = {
             ...parsed,
             id,
+            sourceKey: id,
+            importedAt: existing?.importedAt ?? parsed.importedAt,
             fileName: existing?.fileName ?? parsed.fileName,
           };
           pool.set(key, value);
@@ -148,8 +198,8 @@ export async function prepareImport(
         const latest = pool.get(key)!;
         next.fileRunIDs[file.path] = latest.id;
         next.importMetadata![key] = {
-          digest: !meta || isNewer ? hash : meta.digest,
-          modifiedAt: Math.max(file.modifiedAt, meta?.modifiedAt ?? 0),
+          digest: !meta || (!alreadyArchived && isNewer) ? hash : meta.digest,
+          modifiedAt: !meta || (!alreadyArchived && isNewer) ? file.modifiedAt : meta.modifiedAt,
           versions: [...new Set([...(meta?.versions ?? []), hash])],
         };
       }
@@ -160,6 +210,32 @@ export async function prepareImport(
       );
     }
   }
+  const progressPath = files.find((file) => file.name.toLowerCase() === "progress.save")?.path;
+  if (progressPath) {
+    for (const path of Object.keys(next.manifest)) {
+      if (path !== progressPath && path.split(/[\\/]/).at(-1)?.toLowerCase() === "progress.save")
+        delete next.manifest[path];
+    }
+  }
   next.runs = [...pool.values()].sort((a, b) => a.id.localeCompare(b.id));
   return next;
+}
+
+export interface ImportTransaction {
+  dataset: Dataset;
+  changed: boolean;
+  serialized: string;
+}
+/** Comparison and JSON serialization run in the analysis worker, including archive restores. */
+export async function prepareImportTransaction(
+  previous: Dataset,
+  files: SaveFile[],
+  source: string,
+  game: GameVersion,
+  current: Dataset = previous,
+): Promise<ImportTransaction> {
+  const imported = await prepareImport(previous, files, source, game);
+  const changed = JSON.stringify({ ...imported, importedAt: current.importedAt }) !== JSON.stringify(current);
+  const dataset = changed ? imported : current;
+  return { dataset, changed, serialized: JSON.stringify(dataset) };
 }

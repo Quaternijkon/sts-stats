@@ -4,6 +4,9 @@ on:
   workflow_call:
 permissions:
   contents: read
+concurrency:
+  group: build-desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   desktop:
     strategy:
@@ -17,6 +20,7 @@ jobs:
             platform: windows
             args: --bundles nsis,msi
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,6 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: sts2stats-${{ matrix.platform }}
+          retention-days: 14
           if-no-files-found: error
           path: |
             src-tauri/target/**/bundle/dmg/*.dmg

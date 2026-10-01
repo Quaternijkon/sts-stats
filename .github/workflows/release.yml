@@ -5,13 +5,24 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+    permissions:
+      contents: read
   desktop:
+    needs: check
     uses: ./.github/workflows/build-desktop.yml
+    permissions:
+      contents: read
   release:
     needs: desktop
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:

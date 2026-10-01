@@ -35,6 +35,15 @@ async function saveFiles(files: File[]): Promise<SaveFile[]> {
       })),
   );
 }
+function download(name: string, blob: Blob): boolean {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name.split(/[\\/]/).at(-1) || "export";
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
 /** Browser adapter supports isolated previews; installed apps use native storage. */
 const browser: StatsPlatform = {
   async takeDroppedSources() {
@@ -54,6 +63,9 @@ const browser: StatsPlatform = {
   async scanDirectory() {
     throw new Error("浏览器预览需要重新选择文件夹；自动同步在桌面应用中可用");
   },
+  async resolveDirectory(directory) {
+    return directory;
+  },
   async snapshotDirectory() {
     throw new Error("浏览器预览不支持自动同步");
   },
@@ -67,28 +79,31 @@ const browser: StatsPlatform = {
     const value = localStorage.getItem("sts2stats.dataset." + game);
     return value ? JSON.parse(value) : null;
   },
-  async saveDataset(game, dataset) {
-    const text = JSON.stringify(dataset);
-    localStorage.setItem(
-      "sts2stats.archive." + game + "." + dataset.source,
-      text,
-    );
-    localStorage.setItem("sts2stats.dataset." + game, text);
+  async saveDataset(game, dataset, _files, serialized) {
+    const text = serialized ?? JSON.stringify(dataset);
+    const archiveKey = "sts2stats.archive." + game + "." + dataset.source;
+    const previous = localStorage.getItem(archiveKey);
+    localStorage.setItem(archiveKey, text);
+    try {
+      localStorage.setItem("sts2stats.dataset." + game, text);
+    } catch (error) {
+      if (previous === null) localStorage.removeItem(archiveKey);
+      else localStorage.setItem(archiveKey, previous);
+      throw error;
+    }
   },
   async importDataset() {
     const files = await pickFiles(false, true);
     return files.length ? JSON.parse(await files[0].text()) : null;
   },
   async exportText(name, text) {
-    const url = URL.createObjectURL(
-      new Blob([text], { type: "text/plain;charset=utf-8" }),
-    );
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = name;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    return true;
+    return download(name, new Blob([text], { type: "text/plain;charset=utf-8" }));
+  },
+  async exportBinary(name, data) {
+    if (data.length > 512 * 1024 * 1024 ||
+      data.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))
+      throw new Error("导出文件格式或大小无效");
+    return download(name, new Blob([new Uint8Array(data)]));
   },
   async loadPreferences() {
     const value = localStorage.getItem("sts2stats.preferences");
@@ -99,6 +114,9 @@ const browser: StatsPlatform = {
   },
   async dataDirectory() {
     return "浏览器本地存储";
+  },
+  async openDataDirectory() {
+    throw new Error("浏览器预览使用浏览器本地存储，桌面应用可打开数据文件夹");
   },
   async clearDataset(game) {
     localStorage.removeItem("sts2stats.dataset." + game);
@@ -114,23 +132,26 @@ const native: StatsPlatform = {
   chooseFiles: () => invoke<SaveFile[]>("choose_files"),
   scanDirectory: (directory) =>
     invoke<SaveFile[]>("scan_directory", { directory }),
+  resolveDirectory: (directory) => invoke<string>("resolve_directory", { directory }),
   snapshotDirectory: (directory) =>
     invoke<string>("snapshot_directory", { directory }),
   loadSourceDataset: (game, source) =>
     invoke<Dataset | null>("load_source_dataset", { game, source }),
   loadDataset: (game) => invoke<Dataset | null>("load_dataset", { game }),
-  saveDataset: (game, dataset, files) =>
+  saveDataset: (game, dataset, files, serialized) =>
     invoke("save_dataset", {
       game,
-      text: JSON.stringify(dataset),
+      text: serialized ?? JSON.stringify(dataset),
       files: files ?? [],
     }),
   importDataset: () => invoke<Dataset | null>("import_dataset"),
   exportText: (name, text) => invoke<boolean>("export_text", { name, text }),
+  exportBinary: (name, data) => invoke<boolean>("export_binary", { name, data }),
   loadPreferences: () => invoke<Preferences | null>("load_preferences"),
   savePreferences: (preferences) =>
     invoke("save_preferences", { text: JSON.stringify(preferences) }),
   dataDirectory: () => invoke<string>("data_directory"),
+  openDataDirectory: () => invoke("open_data_directory"),
   clearDataset: (game) => invoke("clear_dataset", { game }),
 };
 const adapter = isTauri() ? native : browser;
@@ -143,6 +164,14 @@ export const platform: StatsPlatform = {
       window.dispatchEvent(
         new CustomEvent("sts2stats:error", { detail: String(error) }),
       );
+      return false;
+    }
+  },
+  async exportBinary(name, data) {
+    try {
+      return await adapter.exportBinary(name, data);
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("sts2stats:error", { detail: String(error) }));
       return false;
     }
   },

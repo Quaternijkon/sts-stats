@@ -26,7 +26,7 @@ export const DATA_ITEM_META: Record<DataItemKind, { singular: string; plural: st
   party: { singular: '队伍', plural: '队伍', path: 'parties' },
   gameMode: { singular: '游戏模式', plural: '游戏模式', path: 'modes' },
   floor: { singular: '楼层', plural: '楼层', path: 'floors' },
-  act: { singular: '幕', plural: '幕', path: 'acts' },
+  act: { singular: '阶段', plural: '阶段', path: 'acts' },
   date: { singular: '日期', plural: '日期', path: 'dates' },
   week: { singular: '周', plural: '周', path: 'weeks' },
   playerPosition: { singular: '玩家位次', plural: '玩家位次', path: 'player-positions' },
@@ -63,7 +63,7 @@ export function dataItemLabel(item: DataItemRef): string {
   if (kind === 'ascension') return `A${id}`;
   if (kind === 'party') return id === 'coop' ? '多人合作' : '单人';
   if (kind === 'floor') return `${id}F`;
-  if (kind === 'act') return `第 ${id} 幕`;
+  if (kind === 'act') return `第 ${id} 阶段`;
   if (kind === 'playerPosition') return `玩家 ${id}`;
   if (kind === 'roomType') return zhMapType(id);
   return id;

@@ -12,7 +12,7 @@
 
 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm verify:local`、`pnpm check:version`、`pnpm build`、`pnpm test:e2e`；Rust fmt / clippy / test 使用 src-tauri/Cargo.toml 和 Cargo.lock。
 
-普通推送不产生安装包；PR、main 推送及手动触发 Check。Build Desktop 仅手动或 Release 调用。Release 仅 v* 标签发布，尚无 Check 前置依赖。三个版本字段和标签须一致。不得擅自推送、绑定别的仓库或发布。
+普通推送不产生安装包；PR、main 推送及手动触发 Check。Check 在 Chromium / WebKit 验证合成前端，在 macOS / Windows 验证 Rust。Build Desktop 仅手动或 Release 调用。Release 先通过 Check，再构建，仅 v* 标签发布。三个版本字段和标签须一致。不得擅自推送、绑定别的仓库或发布。
 
 ## 数据约束
 
@@ -20,11 +20,11 @@
 
 ## 页面约束
 
-复用统一 Card、MetricTile、MetricGrid、ObjectNumericCell 和 CSS tokens；标题简洁，说明只放 title / hover 帮助，禁止灰色解释性页脚。页面间距 24 / 窄屏16，章节20，组件12；指标卡内距16、圆角20、图标20、主值28，最多六列。
+复用统一 Card、MetricTile、MetricGrid、ObjectNumericCell、NumericColumnScale、PerspectiveAnalysisCard 和 CSS tokens；标题简洁，说明只放 title / hover 帮助，禁止灰色解释性页脚。页面间距 24 / 窄屏16，章节20，组件12；指标卡内距16、圆角20、图标20、主值28，按实际容器宽度换行、最多六列。指标饱和渐变集中维护，保持白色图标、数值和标签的可读对比度。
 
-角色颜色按稳定 ID 绑定 Ironclad 红、Silent 绿、Regent 金橙、Necrobinder 紫、Defect 蓝、Watcher 紫红；颜色集中在 theme.ts 和 CSS tokens，不能按排序或胜率分配。数量蓝、胜利绿、承伤红、选择紫、金币金、连胜金橙、时间青蓝、楼层青绿。连续数值大小蓝→青→橙；比例红→黄→绿固定0/50/100%；偏好使用 #4f57c7→淡色→#107564，50%中性。风险必须有绝对阈值、方向、单位、文字或图标，否则保持中性，不能从样本百分位猜风险。
+角色颜色按稳定 ID 绑定 Ironclad 红、Silent 绿、Regent 金橙、Necrobinder 紫、Defect 蓝、Watcher 紫红；颜色集中在 theme.ts 和 CSS tokens，不能按排序或胜率分配。对象链接用 objectColor，指标用 metricColor / metricSemantic；分类与模组按稳定 ID 配色。数量蓝、胜利绿、承伤红、选择紫、金币金、连胜金橙、时间青蓝、楼层青绿。连续数值大小蓝→青→橙；比例红→黄→绿固定0/50/100%；偏好使用 #4f57c7→淡色→#107564，50%中性。风险必须有绝对阈值、方向、单位、文字或图标，否则保持中性，不能从样本百分位猜风险。
 
-数值柱长：比例为实际0–1；数量／时长为完整筛选列的 count(smaller)/(n-1)，并列同排名、单值0；缺失显示—，不补零。分页前算排名。表头和矩阵左名称固定且背景不透明，大列表分页或虚拟化。
+数值柱长：比例为实际0–1；数量／时长为完整筛选列的 count(smaller)/(n-1)，并列同排名、单值0；缺失显示—，不补零。分页前算排名；中性颜色强度使用同列实际数值尺度，不能直接用排名替代。表头和矩阵左名称固定且背景不透明，大列表分页或虚拟化。
 
 仅投入时间、滚动胜率和楼层到达率有局部角色滑块，保留全局其他过滤，稳定高度，最多六缓存响应，过时结果不覆盖新选择。胜负记录总体＋角色，五行按列排序，完整横向滚动，胜利绿失败红放弃灰。楼层1–49为实际到达，50固定通关率（胜利÷非放弃）。滚动和楼层用胶囊柱、固定0–100%轴。多人不得进入单人分析。
 

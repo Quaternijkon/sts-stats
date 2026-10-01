@@ -53,7 +53,7 @@ export function addObjectNumericFills(rows: ObjectRow[]): void {
   }
 }
 
-const SOURCE_LABELS: Record<string, string> = { run: '对局记录', raw: '原始记录', timeline: '节点记录', normalized: '标准记录', cardChoices: '选项记录', relicChoices: '选项记录', potionChoices: '选项记录', ancientChoices: '选项记录', eventChoices: '选项记录', encounterEvents: '战斗记录', floor: '楼层记录', act: '幕记录', type: '节点类型', deck: '最终持有记录', relics: '最终持有记录', restChoices: '休息记录', startingDeck: '初始持有记录', startingRelics: '初始持有记录' };
+const SOURCE_LABELS: Record<string, string> = { run: '对局记录', raw: '原始记录', timeline: '节点记录', normalized: '标准记录', cardChoices: '选项记录', relicChoices: '选项记录', potionChoices: '选项记录', ancientChoices: '选项记录', eventChoices: '选项记录', encounterEvents: '战斗记录', floor: '楼层记录', act: '阶段记录', type: '节点类型', deck: '最终持有记录', relics: '最终持有记录', restChoices: '休息记录', startingDeck: '初始持有记录', startingRelics: '初始持有记录' };
 function sourceLabel(source: string): string { return source.split('.').map((part) => SOURCE_LABELS[part] || part).join(' · '); }
 const EVENT_IDS = ['offered', 'picked', 'skipped', 'acquired', 'bought', 'removed', 'upgraded', 'downgraded', 'transformedFrom', 'transformedTo', 'enchanted', 'used', 'discarded', 'held', 'visited', 'selected', 'completed', 'applied', 'recorded', 'reached', 'fought'];
 const METRIC_LABELS: Record<string, string> = {
@@ -429,7 +429,8 @@ export class UnifiedObjectRegistry {
       group.observations += 1; group.runs.add(event.run.id); related.set(key, group);
     }
     const runs = model.relatedRuns.sort((a, b) => b.startTime - a.startTime || a.id.localeCompare(b.id));
-    const runOffset = page(query.runOffset, 0), runLimit = page(query.runLimit, 100, 500);
+    const runOffset = page(query.runOffset, 0), runLimit = Math.max(1, page(query.runLimit, 100, 500));
+    const evidenceOffset = page(query.evidenceOffset, 0), evidenceLimit = Math.max(1, page(query.evidenceLimit, 100, 500));
     const breakdowns = [model.breakdown('character', '角色', (event) => [event.character]), model.breakdown('floor', '楼层', (event) => event.floor === null ? [] : [String(event.floor)]), model.breakdown('source', '来源', (event) => event.sources), model.breakdown('event', '行为', (event) => [event.event]), model.choices()].filter((table) => table.rows.length);
     if (query.kind === 'card') breakdowns.unshift(...cardHoldingBreakdowns(query.id, runs));
     for (const table of breakdowns) {
@@ -455,7 +456,7 @@ export class UnifiedObjectRegistry {
       breakdowns,
       relatedObjects: [...related.entries()].map(([key, group]) => ({ ...identity(group.ref), key, observations: group.observations, runs: group.runs.size })).sort((a, b) => b.observations - a.observations || a.key.localeCompare(b.key)),
       runs: runs.slice(runOffset, runOffset + runLimit).map((run) => ({ id: run.id, character: run.character, status: run.status, floor: run.floor, startTime: run.startTime })), runTotal: runs.length, runOffset, runLimit,
-      evidence: model.events.slice(0, 200).map((event, index) => ({ id: `${objectKey(model.ref)}:${index}`, event: event.event, source: event.sources.join(', '), runId: event.run.id, playerIndex: event.playerIndex, character: event.character, floor: event.floor })), evidenceTotal: model.events.length
+      evidence: model.events.slice(evidenceOffset, evidenceOffset + evidenceLimit).map((event, index) => ({ id: `${objectKey(model.ref)}:${evidenceOffset + index}`, event: event.event, source: event.sources.join(', '), runId: event.run.id, playerIndex: event.playerIndex, character: event.character, floor: event.floor })), evidenceTotal: model.events.length, evidenceOffset, evidenceLimit
     };
   }
 }

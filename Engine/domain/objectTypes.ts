@@ -49,8 +49,12 @@ export interface ObjectDetailResponse {
   runLimit: number;
   evidence: ObjectEvidence[];
   evidenceTotal: number;
+  evidenceOffset: number;
+  evidenceLimit: number;
 }
 export interface ObjectQuery {
+  evidenceOffset?: number;
+  evidenceLimit?: number;
   minimumSample?: number;
   kind: ObjectKind;
   id?: string;

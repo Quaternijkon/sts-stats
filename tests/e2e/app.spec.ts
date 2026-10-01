@@ -97,21 +97,16 @@ test("statistics, objects, records, replay and game isolation", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "尖塔数据终端", exact: true }).click();
   await page.getByRole("button", { name: "杀戮尖塔 1", exact: true }).click();
-  await expect(
-    page
-      .locator(".metric-tile")
-      .filter({ hasText: "单人对局" })
-      .locator("strong"),
-  ).toHaveText("0");
+  await expect(page.getByText("尚未导入单人记录", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
-test("theme, narrow layout and long scrolling tables", async ({ page }) => {
+test("theme, narrow layout and long scrolling tables", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.getByRole("button", { name: "杀戮尖塔 2", exact: true }).click();
   await expect(
     page.locator(".history-grid").first().locator("button"),
   ).toHaveCount(124);
-  await page.screenshot({ path: "test-results/overview-light.png" });
+  await page.screenshot({ path: testInfo.outputPath("overview-light.png") });
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByLabel("外观").selectOption("dark");
   await page.getByRole("button", { name: "全局统计", exact: true }).click();
@@ -121,10 +116,10 @@ test("theme, narrow layout and long scrolling tables", async ({ page }) => {
       .filter({ hasText: "单人对局" })
       .locator("strong"),
   ).toHaveText("124");
-  await page.screenshot({ path: "test-results/overview-dark.png" });
+  await page.screenshot({ path: testInfo.outputPath("overview-dark.png") });
   await page.setViewportSize({ width: 640, height: 900 });
   await expect(page.getByRole("button", { name: "切换侧栏" })).toBeVisible();
-  await page.screenshot({ path: "test-results/overview-narrow.png" });
+  await page.screenshot({ path: testInfo.outputPath("overview-narrow.png") });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -143,7 +138,7 @@ test("theme, narrow layout and long scrolling tables", async ({ page }) => {
     .first()
     .evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(background).not.toBe("rgba(0, 0, 0, 0)");
-  await page.screenshot({ path: "test-results/records-scrolled.png" });
+  await page.screenshot({ path: testInfo.outputPath("records-scrolled.png") });
 });
 
 test("all desktop navigation pages render without runtime errors", async ({
@@ -165,7 +160,7 @@ test("all desktop navigation pages render without runtime errors", async ({
       .locator(".sidebar nav")
       .getByRole("button", { name: name.trim(), exact: true })
       .click();
-    await expect(page.locator(".page-content")).not.toContainText("正在分析");
+    await expect(page.locator(".page-content [data-analysis-ready='true']").first()).toBeAttached();
     await expect(page.locator(".page-content .error-state")).toHaveCount(0);
   }
   await page

@@ -1,0 +1,231 @@
+.overview-page {
+  display: grid;
+  gap: var(--section-spacing, 20px);
+  min-width: 0;
+}
+.overview-page .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.overview-page .overview-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--component-spacing, 12px);
+}
+.overview-history-group {
+  min-width: 0;
+}
+.overview-history-group h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--component-spacing, 12px);
+}
+.overview-history-group h3 > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-history-group h3 > small {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.overview-history-grid {
+  padding: 0 0 8px;
+}
+.overview-history-virtual {
+  display: block;
+}
+.overview-history-track {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 4px;
+}
+.overview-history-grid button,
+.overview-outcome-empty {
+  border-radius: 4px;
+  transition: filter 110ms, box-shadow 110ms;
+}
+.overview-outcome-empty {
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+}
+.overview-history-grid button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+.overview-activity {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--component-spacing, 12px);
+  min-width: 0;
+}
+.overview-activity-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--component-spacing, 12px);
+  font-variant-numeric: tabular-nums;
+}
+.overview-activity-heading select {
+  width: 130px;
+}
+.overview-calendar-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.overview-calendar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 15px;
+  grid-template-columns: 32px;
+  gap: 3px;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 20px;
+}
+.overview-calendar-week,
+.overview-weekdays {
+  display: grid;
+  grid-template-rows: 20px repeat(7, 15px);
+  gap: 3px;
+}
+.overview-weekdays > span,
+.overview-month {
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.overview-calendar-day {
+  border-radius: 2px;
+  transition: filter 110ms, box-shadow 110ms;
+}
+.overview-calendar-day:not(.empty):hover,
+.overview-calendar-day:not(.empty):focus-visible {
+  filter: brightness(1.15);
+  box-shadow: inset 0 0 0 1px var(--text);
+  outline: none;
+}
+.overview-calendar-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.overview-calendar-legend > span:first-child {
+  margin-right: auto;
+}
+.overview-calendar-legend > i {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+.overview-rates {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: var(--component-spacing, 12px);
+}
+.overview-rates > .rate-chart {
+  min-height: 0;
+  flex: 1;
+}
+.overview-rates .bar-chart {
+  height: 100%;
+  padding-right: 30px;
+}
+.overview-rates .bar-column > small {
+  white-space: nowrap;
+}
+.overview-rates .bar-column:focus-visible {
+  outline: none;
+}
+.overview-rates .bar-column:focus-visible > span {
+  box-shadow: inset 0 0 0 1px var(--text);
+  filter: brightness(1.12);
+}
+.overview-rate-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  min-height: 15px;
+}
+.overview-rate-legend > span:first-child {
+  margin-right: auto;
+}
+.overview-rate-legend > i {
+  width: 100px;
+  height: 8px;
+  border-radius: 999px;
+}
+.overview-page .character-bars > div {
+  grid-template-columns: minmax(80px, 120px) minmax(30px, 1fr) 54px;
+}
+.overview-page .character-bars > div > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-page .character-bars i {
+  transition: filter 110ms, box-shadow 110ms;
+}
+.overview-page .character-bars > div > div:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+.overview-character-table {
+  max-height: 430px;
+}
+.overview-rest-table {
+  max-height: 430px;
+}
+.overview-character-table th > button,
+.overview-character-name {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  justify-content: inherit;
+  font: inherit;
+}
+.overview-character-table td:first-child {
+  max-width: 240px;
+  white-space: normal;
+}
+.overview-character-table tr[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.overview-character-record {
+  margin-top: var(--component-spacing, 12px);
+}
+.overview-character-record > .details {
+  padding: var(--component-spacing, 12px) 0;
+}
+.overview-character-record pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.overview-table-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--component-spacing, 12px);
+  margin-top: var(--component-spacing, 12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-calendar-day,
+  .overview-history-grid button,
+  .overview-page .character-bars i {
+    transition: none;
+  }
+}

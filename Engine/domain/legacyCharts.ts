@@ -118,12 +118,12 @@ export function heatmapChart(rows, options = {}) {
     const floor = index + 1;
     const row = byKey.get(`${act}:${floor}`);
     const delay = Math.min(cellIndex++, 36) * 10 + 60;
-    if (!row) return `<div class="heat-cell is-empty" style="--chart-delay:${delay}ms" title="第 ${act} 幕 · 幕内第 ${floor} 层：无样本"></div>`;
+    if (!row) return `<div class="heat-cell is-empty" style="--chart-delay:${delay}ms" title="第 ${act} 阶段 · 阶段内第 ${floor} 层：无样本"></div>`;
     const value = Number(row[options.valueKey || 'avgDamage']) || 0;
     const intensity = Math.min(1, value / max);
-    const title = `第 ${act} 幕 · 幕内第 ${floor} 层 · ${options.tooltip ? options.tooltip(row) : value.toFixed(2)} · ${row.samples} 个样本`;
+    const title = `第 ${act} 阶段 · 阶段内第 ${floor} 层 · ${options.tooltip ? options.tooltip(row) : value.toFixed(2)} · ${row.samples} 个样本`;
     return `<div class="heat-cell${row.runIds?.length ? ' is-clickable' : ''}" ${row.runIds?.length ? `data-chart-run-ids="${esc(row.runIds.join(','))}" tabindex="0"` : ''} style="--heat:${intensity.toFixed(3)};--chart-delay:${delay}ms" title="${esc(title)}${row.runIds?.length ? ' · 点击查看' : ''}"><span>${value >= (options.labelThreshold ?? max * .55) ? esc(options.formatValue ? options.formatValue(value) : value.toFixed(0)) : ''}</span></div>`;
-  }).join('')).join('')}</div><div class="heatmap-act-labels">${acts.map((act) => `<span>第 ${act} 幕</span>`).join('')}</div></div>`;
+  }).join('')).join('')}</div><div class="heatmap-act-labels">${acts.map((act) => `<span>第 ${act} 阶段</span>`).join('')}</div></div>`;
 }
 
 export function divergingBars(rows, options = {}) {

@@ -27,6 +27,7 @@ export interface SaveFile {
 }
 export interface ImportSelection {
   directory: string;
+  source?: string;
   files: SaveFile[];
 }
 export interface Preferences {
@@ -38,6 +39,8 @@ export interface Preferences {
     {
       source: string;
       favorites: string[];
+      autoSync?: boolean;
+      lastSyncedAt?: number;
       filter?: Partial<FilterSpec>;
       pageFilters?: Record<string, Partial<FilterSpec>>;
     }
@@ -47,6 +50,7 @@ export interface StatsPlatform {
   takeDroppedSources(): Promise<ImportSelection | null>;
   chooseDirectory(): Promise<ImportSelection | null>;
   chooseFiles(): Promise<SaveFile[]>;
+  resolveDirectory(directory: string): Promise<string>;
   scanDirectory(directory: string): Promise<SaveFile[]>;
   snapshotDirectory(directory: string): Promise<string>;
   loadSourceDataset(game: GameVersion, source: string): Promise<Dataset | null>;
@@ -55,11 +59,14 @@ export interface StatsPlatform {
     game: GameVersion,
     dataset: Dataset,
     files?: SaveFile[],
+    serialized?: string,
   ): Promise<void>;
   importDataset(): Promise<Dataset | null>;
   exportText(name: string, text: string): Promise<boolean>;
+  exportBinary(name: string, data: number[]): Promise<boolean>;
   loadPreferences(): Promise<Preferences | null>;
   savePreferences(preferences: Preferences): Promise<void>;
   dataDirectory(): Promise<string>;
+  openDataDirectory(): Promise<void>;
   clearDataset(game: GameVersion): Promise<void>;
 }
