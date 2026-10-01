@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "character_stats": [{ "id": "Silent", "total_wins": 1, "total_losses": 0, "playtime": 900, "max_ascension": 1 }],
+  "card_stats": [],
+  "encounter_stats": [],
+  "enemy_stats": [],
+  "ancient_stats": [],
+  "epochs": [],
+  "discovered_acts": [],
+  "discovered_cards": [],
+  "discovered_events": [],
+  "discovered_potions": [],
+  "discovered_relics": [],
+  "total_playtime": 900,
+  "floors_climbed": 1,
+  "total_unlocks": 0
+}

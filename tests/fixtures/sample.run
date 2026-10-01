@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "build_id": "fixture-v1",
+  "game_mode": "standard",
+  "platform_type": "test",
+  "seed": "fixture-private-seed",
+  "start_time": 1700000000,
+  "run_time": 900,
+  "ascension": 1,
+  "win": true,
+  "was_abandoned": false,
+  "players": [{ "id": 1, "character": "Silent", "deck": [], "relics": [], "potions": [], "badges": [] }],
+  "map_point_history": [[{
+    "map_point_type": "monster",
+    "rooms": [{ "room_type": "monster", "model_id": "fixture encounter", "turns_taken": 3 }],
+    "player_stats": [{ "player_id": 1, "current_hp": 50, "max_hp": 60, "current_gold": 20, "damage_taken": 3, "hp_healed": 0, "gold_gained": 20, "gold_spent": 0 }]
+  }]]
+}

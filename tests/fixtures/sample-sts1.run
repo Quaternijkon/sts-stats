@@ -1,0 +1,48 @@
+{
+  "play_id": "synthetic-sts1-run",
+  "timestamp": 1700000000,
+  "local_time": "20231114221320",
+  "seed_played": "SYNTHETIC-SEED",
+  "build_version": "2022-11-30",
+  "character_chosen": "WATCHER",
+  "ascension_level": 7,
+  "floor_reached": 5,
+  "playtime": 720,
+  "victory": false,
+  "score": 42,
+  "gold": 88,
+  "master_deck": ["Strike_P", "Eruption+1", "Vigilance", "Conclude"],
+  "relics": ["PureWater", "Anchor"],
+  "path_per_floor": ["M", "?", "R", "E", "M"],
+  "current_hp_per_floor": [68, 68, 68, 55, 51],
+  "max_hp_per_floor": [72, 72, 72, 72, 72],
+  "gold_per_floor": [110, 85, 85, 112, 130],
+  "damage_taken": [
+    {"floor": 1, "damage": 4, "enemies": "Jaw Worm", "turns": 3},
+    {"floor": 4, "damage": 13, "enemies": "Gremlin Nob", "turns": 5},
+    {"floor": 5, "damage": 4, "enemies": "2 Louse", "turns": 2}
+  ],
+  "card_choices": [
+    {"floor": 1, "picked": "Conclude", "not_picked": ["EmptyMind", "FollowUp"]}
+  ],
+  "campfire_choices": [
+    {"floor": 3, "key": "SMITH", "data": "Eruption"}
+  ],
+  "event_choices": [
+    {"floor": 2, "event_name": "The Cleric", "player_choice": "Card Removal", "cards_removed": ["Defend_P"], "gold_loss": 25, "damage_healed": 0, "gold_gain": 0}
+  ],
+  "relics_obtained": [
+    {"floor": 4, "key": "Anchor"}
+  ],
+  "potions_obtained": [
+    {"floor": 1, "key": "AttackPotion"}
+  ],
+  "items_purged": ["Defend_P"],
+  "items_purged_floors": [2],
+  "boss_relics": [],
+  "is_daily": false,
+  "is_trial": false,
+  "is_endless": false,
+  "chose_seed": false,
+  "killed_by": "2 Louse"
+}
