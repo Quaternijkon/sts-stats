@@ -2,7 +2,7 @@
 
 对照源为相邻 `sts2stats` 工程中的 Swift 视图、AppStore、AnalysisEngine、SaveSyncMonitor、模型与上游 Engine；修改仅位于 Tauri 工程。八个 subagent 分别承担概览、对象、记录、存储、引擎、共用界面、云端流程和独立集成审查。
 
-以下为代码实现与静态审查结果。新增回归用例尚未执行，不能据此声称 TypeScript、Rust、浏览器或安装包验证通过。
+以下为代码实现与静态审查清单，源码已按用户授权推送到 `codex/native-feature-parity` 分支进行检查和编译。清单本身不代表 TypeScript、Rust、浏览器或安装包验证通过，实际结果以 [Actions](https://github.com/Quaternijkon/sts-stats/actions) 为准。
 
 | 范围 | 对照原生入口 | 已补齐的能力 | Tauri 实现与合成回归 |
 | --- | --- | --- | --- |
@@ -29,8 +29,8 @@
 - 游戏译名沿用官方库，并通过指定翻译工具核对新增或修改用词。例如 v0.111.0 `CUSTOM_RUN_SCREEN.MODIFIERS_TITLE` 为“特效”，`MULTIPLAYER_LOAD_MENU.ACT` 为“阶段：{act}”。ID 和表达式不变，原工程与生成本地化资源未修改。
 - 原存档只读；导出经用户选择目标，原始 `.run` 使用 `.run.json` 文件名。测试、报告和将来的截图只使用合成数据及仓库确定性夹具。
 
-## 待执行验证
+## 云端验证
 
-本轮遵守目标 AGENTS.md，仅编辑源码和阅读 diff，没有本地安装、检查、测试、构建、预览或打包，没有推送或发布。需在用户授权推送后执行 Check，依据实际结果修正 TypeScript、ESLint、Vitest、双引擎 Playwright、架构审计以及两平台 Rust fmt／Clippy／tests 的失败。
+本轮遵守目标 AGENTS.md，没有本地安装、检查、测试、构建、预览或打包。用户授权后将代码推送到现有仓库的独立分支，执行 Check 并依据实际结果修正 TypeScript、ESLint、Vitest、双引擎 Playwright、架构审计及两平台 Rust fmt／Clippy／tests 的失败，再通过 Build Desktop 编译安装包；不创建发布标签。
 
 实际 macOS／Windows 安装、原生对话框、系统打印及 WebView 交互验收仍需桌面构建和安装包验证。双引擎合成 E2E 与 Rust 测试不代替这一步；签名、公证与发布未执行。

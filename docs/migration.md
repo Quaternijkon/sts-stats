@@ -1,6 +1,6 @@
 # 移植覆盖与验证
 
-2026-10-02 的逐项补齐和静态集成审查见 [native-parity-2026-10-02.md](native-parity-2026-10-02.md)。本轮新增实现和测试尚待云端执行；下文迁移初期的通过记录不适用于尚未检查的新修改。当前 Release 已增加完整 Check 前置依赖，云端检查覆盖 Chromium / WebKit 和 macOS / Windows。
+2026-10-02 的逐项补齐和静态集成审查见 [native-parity-2026-10-02.md](native-parity-2026-10-02.md)。源码已推送到独立分支进行云端检查，实际结果见 [Actions](https://github.com/Quaternijkon/sts-stats/actions)；下文迁移初期的通过记录不适用于新修改。当前 Release 已增加完整 Check 前置依赖，云端检查覆盖 Chromium / WebKit 和 macOS / Windows。
 
 | 原项目能力 | 新入口／实现 |
 | --- | --- |

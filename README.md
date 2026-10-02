@@ -62,4 +62,4 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-架构见 [docs/architecture.md](docs/architecture.md)，功能逐项对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)，云端流程及验证边界见 [docs/cloud-validation.md](docs/cloud-validation.md)。本轮新增代码与测试尚待 GitHub Actions 实际运行，不将静态审查视作检查通过。纯本地运行，没有账号、服务器、远程分析或遥测。示例与截图仅使用合成数据。禁止把个人存档、账户标识或用户数据集提交进仓库、公共资源或报告。
+架构见 [docs/architecture.md](docs/architecture.md)，功能逐项对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)，云端流程及验证边界见 [docs/cloud-validation.md](docs/cloud-validation.md)。检查状态和安装包下载见 [Actions](https://github.com/Quaternijkon/sts-stats/actions)，不将静态审查视作检查通过。纯本地运行，没有账号、服务器、远程分析或遥测。示例与截图仅使用合成数据。禁止把个人存档、账户标识或用户数据集提交进仓库、公共资源或报告。

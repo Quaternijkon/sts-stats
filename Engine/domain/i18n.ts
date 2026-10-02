@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { OFFICIAL_ZH_GZIP_BASE64 } from '../official-zh.js';
-import OFFICIAL_EXTRA from '../localization/official-extra.json';
-import STS1_OFFICIAL from '../localization/sts1-official-zh.json';
+import OFFICIAL_EXTRA from '../localization/official-extra.json' with { type: 'json' };
+import STS1_OFFICIAL from '../localization/sts1-official-zh.json' with { type: 'json' };
 import { gameVersion } from './game.js';
 
 const binary = atob(OFFICIAL_ZH_GZIP_BASE64);
