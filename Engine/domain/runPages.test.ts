@@ -38,8 +38,10 @@ describe('paged run analysis', () => {
     const timeline = [{ floor: 1, hp: 15, maxHp: 60, recordedFields: ['hp', 'maxHp'] }] as TimelinePoint[];
     const value = run('normalized', { timeline });
     expect(playerTimeline(value)).toBe(timeline);
+    expect(playerTimeline({ ...value, playerTimelines: [[]] })).toBe(timeline);
     expect(playerTimeline({ ...value, playerTimelines: [timeline, [{ ...timeline[0], hp: 20 }]] }, 1)[0].hp).toBe(20);
     expect(playerTimeline(value, 1)).toEqual([]);
+    expect(playerTimeline({ ...value, playerTimelines: [[], []] }, 1)).toEqual([]);
   });
 
   it('filters coop compositions with search and favorites and preserves missing telemetry', () => {

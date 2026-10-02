@@ -54,7 +54,9 @@ export interface RunPageResponse {
 export function playerTimeline(run: NormalizedRunV2, index = 0): TimelinePoint[] {
   const rebuilt = buildPlayerTimeline(run, index) as TimelinePoint[];
   if (rebuilt.length) return rebuilt;
-  return run.playerTimelines?.[index] ?? (index === 0 ? run.timeline : []) ?? [];
+  const normalized = run.playerTimelines?.[index];
+  if (normalized?.length) return normalized;
+  return index === 0 ? run.timeline ?? [] : normalized ?? [];
 }
 
 export function runSummary(run: NormalizedRunV2): NormalizedRunV2 {

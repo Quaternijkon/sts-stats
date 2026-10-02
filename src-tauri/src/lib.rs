@@ -851,7 +851,11 @@ mod tests {
         fs::create_dir_all(source.path().join("profile2/saves")).unwrap();
         fs::write(source.path().join("profile1/saves/a.run"), "{}").unwrap();
         fs::write(source.path().join("profile2/saves/b.run"), "{}").unwrap();
-        fs::write(source.path().join("profile.save"), "{\"last_profile_id\":1}").unwrap();
+        fs::write(
+            source.path().join("profile.save"),
+            "{\"last_profile_id\":1}",
+        )
+        .unwrap();
         let storage = Storage {
             root: app.path().canonicalize().unwrap(),
             authorized: Mutex::default(),
@@ -864,7 +868,11 @@ mod tests {
         assert!(
             first.source.ends_with("profile1/saves") || first.source.ends_with("profile1\\saves")
         );
-        fs::write(source.path().join("profile.save"), "{\"last_profile_id\":2}").unwrap();
+        fs::write(
+            source.path().join("profile.save"),
+            "{\"last_profile_id\":2}",
+        )
+        .unwrap();
         let next = resolve_source(&root).unwrap();
         assert!(storage.authorized.lock().unwrap().contains(&root));
         assert_eq!(scan(&next).unwrap()[0].name, "b.run");
