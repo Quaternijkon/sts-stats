@@ -187,7 +187,7 @@ describe("local import transactions", () => {
   it("preserves separate legacy games without raw identity data", async () => {
     const initial = await prepareImport(emptyDataset(), [file(), file(raw(200), "/synthetic/b.run", 2)], "/synthetic", "sts2");
     for (const run of initial.runs) {
-      delete run.raw;
+      delete (run as Partial<typeof run>).raw;
       run.startTime = 0;
       run.seed = "";
     }
