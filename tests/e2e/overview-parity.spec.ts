@@ -63,8 +63,13 @@ test("rest analysis distinguishes executions, samples and signed percentage-poin
   await expect(row.locator("td").nth(6)).toHaveText("2");
   await expect(row.locator("td").nth(9)).toHaveText("4");
   const routes = page.locator(".card").filter({ has: page.getByRole("heading", { name: "后续路线", exact: true }) });
-  const shop = zhFromTable("map", "LEGEND_MERCHANT.hoverTip.title", "shop");
-  const shopHeal = routes.locator("tbody tr").filter({ hasText: shop }).filter({ hasText: heal });
+  // Official v0.111.0 map key: Shops → 商店; compact locale tables can omit hover tips.
+  const shop = zhFromTable("map", "LEGEND_MERCHANT.hoverTip.title", "商店");
+  const shopHeal = routes.locator("tbody tr")
+    .filter({ has: page.getByRole("cell", { name: shop, exact: true }) })
+    .filter({ has: page.getByRole("cell", { name: heal, exact: true }) });
+  await expect(shopHeal).toHaveCount(1);
+  await expect(shopHeal.locator("td").nth(0)).toHaveText(shop);
   await expect(shopHeal.locator("td").nth(4)).toHaveText("+100.0");
   await expect(shopHeal.locator("td").nth(5)).toHaveText("+1.000");
   await expect(shopHeal.locator("td").nth(7)).toHaveText("2");

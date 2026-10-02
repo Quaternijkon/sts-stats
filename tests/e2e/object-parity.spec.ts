@@ -72,7 +72,7 @@ test("object navigation preserves queries and evidence beyond the former cap", a
   await expect(page.locator(".page-content tbody tr")).toHaveCount(1);
 });
 
-test("arena pages independently, exports the same matrix to PNG and keeps sticky headers", async ({ page }) => {
+test("arena pages independently, exports the same matrix to PNG and keeps sticky headers", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   await page.getByRole("button", { name: "卡牌", exact: true }).click();
   await ready(page);
@@ -96,13 +96,13 @@ test("arena pages independently, exports the same matrix to PNG and keeps sticky
   const header = matrix.locator("thead .sticky-name");
   expect(await header.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
   expect(await header.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
-  await page.screenshot({ path: "test-results/arena-light.png" });
+  await page.screenshot({ path: testInfo.outputPath("arena-light.png") });
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByLabel("外观").selectOption("dark");
   await page.getByRole("button", { name: "卡牌", exact: true }).click();
   await ready(page);
   await page.setViewportSize({ width: 640, height: 900 });
-  await page.screenshot({ path: "test-results/arena-dark-narrow.png" });
+  await page.screenshot({ path: testInfo.outputPath("arena-dark-narrow.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
@@ -112,8 +112,19 @@ test("archetype run pagination leaves the card attribution table intact", async 
   await ready(page);
   const attribution = page.locator(".card").filter({ has: page.getByRole("heading", { name: "卡牌归属", exact: true }) });
   const composition = page.locator(".card").filter({ has: page.getByRole("heading", { name: "对局构成", exact: true }) });
+  await expect(attribution.locator("tbody tr")).toHaveCount(cards.length + 1);
   const count = await attribution.locator("tbody tr").count();
   expect(count).toBeGreaterThan(0);
+  await expect(attribution.locator('tr[data-card-id="CARD.SYNTHETIC_0"]')).toHaveAttribute("data-evidence-status", "insufficient");
+  await expect(attribution.locator('tr[data-card-id="CARD.SYNTHETIC_0"] .numeric-cell.missing')).toHaveCount(8);
+  await expect(attribution.locator(`tr[data-card-id="${strike}"]`)).toHaveAttribute("data-evidence-status", "starter");
+  await expect(attribution.getByRole("button", { name: "导出 CSV", exact: true })).toBeEnabled();
+  await attribution.getByRole("combobox", { name: "证据", exact: true }).selectOption("insufficient");
+  await expect(attribution.locator("tbody tr")).toHaveCount(cards.length);
+  await attribution.getByRole("combobox", { name: "证据", exact: true }).selectOption("starter");
+  await expect(attribution.locator("tbody tr")).toHaveCount(1);
+  await attribution.getByRole("combobox", { name: "证据", exact: true }).selectOption("all");
+  await expect(attribution.locator("tbody tr")).toHaveCount(count);
   await expect(composition.locator("tbody tr")).toHaveCount(100);
   await composition.getByRole("button", { name: "下一页", exact: true }).click();
   await expect(composition.locator("tbody tr")).toHaveCount(25);

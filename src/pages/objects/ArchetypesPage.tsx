@@ -14,6 +14,26 @@ const interval = (values: [number, number] | null) => values ? values.map((value
 const statuses = { analyzed: "已分析", insufficient: "样本不足", starter: "初始牌组" };
 const modes = { conditional_pick: "条件选择", acquisition_sequence: "获得顺序", co_deck: "最终牌组共现" };
 
+type AttributionCard = Partial<ArchetypeCardStat> & Pick<ArchetypeCardStat, "id" | "evidenceStatus" | "dominantArchetype" | "membership">;
+
+function buildAttributionCards(data: CardArchetypeAnalysisResult | null): Record<string, AttributionCard> {
+  if (!data) return {};
+  const cards: Record<string, AttributionCard> = { ...data.cards };
+  const starters = new Set(data.starterCards);
+  const insufficient = new Set(data.insufficientCards);
+  for (const id of [...data.cardOrder, ...data.starterCards, ...data.insufficientCards]) {
+    // The engine only includes numerical stats for analyzed cards. The other
+    // categories still identify real cards; absent statistics remain missing.
+    if (!cards[id]) cards[id] = {
+      id,
+      evidenceStatus: starters.has(id) ? "starter" : insufficient.has(id) ? "insufficient" : "analyzed",
+      dominantArchetype: null,
+      membership: {},
+    };
+  }
+  return cards;
+}
+
 function PairEvidence({ pair, label }: { pair: ArchetypePairAffinity; label: (id: string) => string }) {
   return <Card title={`${label(pair.left)} / ${label(pair.right)}`} help="亲和描述统计关联；相关性不代表因果。方向项比较持有来源卡牌时与未持有时目标卡牌的选择；替代证据模式使用获得顺序或最终牌组共现。">
     <dl className="details pair-evidence">
@@ -54,21 +74,22 @@ export function ArchetypesPage() {
     const index = data?.communities.findIndex((community) => community.id === id) ?? -1;
     return index < 0 ? "未分类" : `流派 ${index + 1}`;
   };
-  const allCards = [...new Set([...(data?.cardOrder ?? []), ...(data?.insufficientCards ?? []), ...(data?.starterCards ?? [])])];
+  const attributionCards = useMemo(() => buildAttributionCards(data), [data]);
+  const allCards = Object.keys(attributionCards);
   const filteredCards = useMemo(() => {
-    const ids = [...new Set([...(data?.cardOrder ?? []), ...(data?.insufficientCards ?? []), ...(data?.starterCards ?? [])])].filter((id) => data?.cards[id] && (evidence === "all" || data.cards[id].evidenceStatus === evidence) && `${zhEntity(id, "cards", id)} ${id}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    const ids = Object.keys(attributionCards).filter((id) => (evidence === "all" || attributionCards[id].evidenceStatus === evidence) && `${zhEntity(id, "cards", id)} ${id}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
     return ids.sort((left, right) => {
-      const a = sort.field === "label" ? zhEntity(left, "cards", left) : data!.cards[left][sort.field as keyof ArchetypeCardStat];
-      const b = sort.field === "label" ? zhEntity(right, "cards", right) : data!.cards[right][sort.field as keyof ArchetypeCardStat];
+      const a = sort.field === "label" ? zhEntity(left, "cards", left) : attributionCards[left][sort.field as keyof ArchetypeCardStat];
+      const b = sort.field === "label" ? zhEntity(right, "cards", right) : attributionCards[right][sort.field as keyof ArchetypeCardStat];
       if (a == null || b == null) return a === b ? 0 : a == null ? 1 : -1;
       const value = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "zh-CN");
       return value * (sort.direction === "asc" ? 1 : -1);
     });
-  }, [data, evidence, search, sort]);
+  }, [attributionCards, evidence, search, sort]);
   const scales = useMemo(() => Object.fromEntries(["offers", "picks", "runsPresent", "copiesAcquired", "specialization", "bridgeScore", "coreScore"].map((field) => [field, new NumericColumnScale(filteredCards.map((id) => {
-    const value = data!.cards[id][field as keyof ArchetypeCardStat];
+    const value = attributionCards[id][field as keyof ArchetypeCardStat];
     return typeof value === "number" ? value : null;
-  }))])), [filteredCards, data]);
+  }))])), [filteredCards, attributionCards]);
   const matrixOrder = data?.matrixOrder ?? [];
   const matrixRows = matrixOrder.slice(matrixRow, matrixRow + 24);
   const matrixColumns = matrixOrder.slice(matrixColumn, matrixColumn + 24);
@@ -78,7 +99,7 @@ export function ArchetypesPage() {
   async function exportCards() {
     if (!data) return;
     const fields = ["offers", "picks", "baselinePickRate", "runsPresent", "copiesAcquired", "dominantArchetype", "specialization", "bridgeScore", "coreScore", "evidenceStatus"] as const;
-    await exportCsv(`${game}-${character}-archetype-cards.csv`, ["ID", "名称", "可选", "选取", "基础选取率", "持有对局", "获得张数", "主流派", "专属性", "桥接分数", "核心分数", "证据", "软归属"], filteredCards.map((id) => [id, label(id), ...fields.map((field) => data.cards[id][field]), data.cards[id].membership]), game);
+    await exportCsv(`${game}-${character}-archetype-cards.csv`, ["ID", "名称", "可选", "选取", "基础选取率", "持有对局", "获得张数", "主流派", "专属性", "桥接分数", "核心分数", "证据", "软归属"], filteredCards.map((id) => [id, label(id), ...fields.map((field) => attributionCards[id][field]), attributionCards[id].membership]), game);
   }
   function changeSort(field: string) {
     setSort({ field, direction: sort.field === field && sort.direction === "desc" ? "asc" : "desc" });
@@ -136,10 +157,10 @@ export function ArchetypesPage() {
       <Card title="卡牌归属" actions={<button disabled={!filteredCards.length} onClick={() => void exportCards()}>导出 CSV</button>}>
         <div className="page-tools"><input type="search" aria-label="搜索流派卡牌" placeholder="搜索名称或 ID" value={search} onChange={(event) => { setSearch(event.target.value); setCardOffset(0); }} /><label>证据<select value={evidence} onChange={(event) => { setEvidence(event.target.value); setCardOffset(0); }}><option value="all">全部</option>{Object.entries(statuses).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label></div>
         <div className="table-scroll"><table><thead><tr>{[["label", "卡牌"], ["dominantArchetype", "主流派"], ["offers", "可选"], ["picks", "选取"], ["baselinePickRate", "基础选取率"], ["runsPresent", "持有对局"], ["copiesAcquired", "获得张数"], ["specialization", "专属性"], ["bridgeScore", "桥接分数"], ["coreScore", "核心分数"], ["evidenceStatus", "证据"]].map(([field, title]) => <th key={field}><button onClick={() => changeSort(field)}>{title}{sort.field === field ? sort.direction === "desc" ? " ↓" : " ↑" : ""}</button></th>)}<th>软归属</th></tr></thead><tbody>{filteredCards.slice(cardOffset, cardOffset + 100).map((id) => {
-          const card = data.cards[id];
-          return <tr key={id}><td className="sticky-name"><button className="object-link" style={{ color: objectColor("card", id) }} onClick={() => openObject("card", id)}>{label(id)}</button></td><td style={{ color: card.dominantArchetype ? objectColor("archetype", card.dominantArchetype) : undefined }}>{communityName(card.dominantArchetype)}</td>{["offers", "picks", "baselinePickRate", "runsPresent", "copiesAcquired", "specialization", "bridgeScore", "coreScore"].map((field) => {
+          const card = attributionCards[id];
+          return <tr key={id} data-card-id={id} data-evidence-status={card.evidenceStatus}><td className="sticky-name"><button className="object-link" style={{ color: objectColor("card", id) }} onClick={() => openObject("card", id)}>{label(id)}</button></td><td style={{ color: card.dominantArchetype ? objectColor("archetype", card.dominantArchetype) : undefined }}>{communityName(card.dominantArchetype)}</td>{["offers", "picks", "baselinePickRate", "runsPresent", "copiesAcquired", "specialization", "bridgeScore", "coreScore"].map((field) => {
             const value = card[field as keyof typeof card];
-            return <td key={field}><ObjectNumericCell value={typeof value === "number" ? value : null} format={field === "baselinePickRate" ? "percent" : "number"} semantic={field === "baselinePickRate" ? "preference" : "number"} fill={typeof value === "number" ? scales[field]?.fraction(value) : null} heat={typeof value === "number" ? scales[field]?.intensity(value) : null} /></td>;
+            return <td key={field}><ObjectNumericCell value={typeof value === "number" ? value : null} format={field === "baselinePickRate" ? "percent" : "number"} semantic={field === "baselinePickRate" ? "preference" : "number"} fill={typeof value === "number" ? scales[field]?.fraction(value) : null} heat={typeof value === "number" ? scales[field]?.intensity(value) : null} help={value === undefined ? "当前模型未提供此项统计。" : undefined} /></td>;
           })}<td>{statuses[card.evidenceStatus]}</td><td>{Object.entries(card.membership).map(([community, value]) => `${communityName(community)} ${formatValue(value, "percent")}`).join(" · ") || "—"}</td></tr>;
         })}</tbody></table>{!filteredCards.length && <EmptyState>没有符合条件的卡牌</EmptyState>}</div>
         <Pager offset={cardOffset} total={filteredCards.length} onChange={setCardOffset} />
