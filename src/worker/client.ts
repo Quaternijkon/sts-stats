@@ -1,4 +1,5 @@
 import type { GameVersion } from "../services/models";
+import { platform } from "../services/platform";
 type Pending = {
   id: number;
   request: Record<string, unknown>;
@@ -26,6 +27,10 @@ export class AnalysisClient {
     const worker = this.worker;
     this.worker.onmessage = ({ data }) => {
       if (worker !== this.worker || this.failed) return;
+      if (data.storage) {
+        void this.serveStorage(worker, data);
+        return;
+      }
       if (data.ready) {
         this.ready = true;
         this.pump();
@@ -36,13 +41,29 @@ export class AnalysisClient {
       this.active = null;
       if (data.error) entry.reject(new Error(data.error));
       else {
-        if (entry.request.op === "load") this.lastLoad = entry.request;
+        if (entry.request.op === "load" || entry.request.op === "open") this.lastLoad = entry.request;
         entry.resolve(data.result, Number(data.bytes) || 0);
       }
       this.pump();
     };
     this.worker.onerror = (event) => { if (worker === this.worker) this.fail(new Error(event.message || "分析引擎无法启动")); };
     this.worker.onmessageerror = () => { if (worker === this.worker) this.fail(new Error("分析结果无法读取")); };
+  }
+  private async serveStorage(worker: Worker, request: { id: number; method: string; args: [GameVersion, string, string, string] }) {
+    const [game, identity, key, text] = request.args;
+    try {
+      let result: unknown;
+      if (request.method === "loadDatasetText") result = await platform.loadDatasetText(game, identity);
+      else if (request.method === "readDerived") result = await platform.readDerived(game, identity, key);
+      else if (request.method === "writeDerived") result = await platform.writeDerived(game, identity, key, text);
+      else throw new Error("未知本地存储请求");
+      if (worker === this.worker && !this.failed) worker.postMessage({ storageResponse: request.id, result });
+    } catch (error) {
+      if (worker === this.worker && !this.failed) {
+        try { worker.postMessage({ storageResponse: request.id, error: String(error) }); }
+        catch (failure) { this.fail(failure instanceof Error ? failure : new Error(String(failure))); }
+      }
+    }
   }
   private fail(error: Error) {
     this.failed = true;
@@ -86,7 +107,7 @@ export class AnalysisClient {
           reject(error instanceof Error ? error : new Error(String(error)));
           return;
         }
-        if (this.lastLoad && request.op !== "load") this.queue.push({
+        if (this.lastLoad && request.op !== "load" && request.op !== "open") this.queue.push({
           id: ++this.sequence, request: this.lastLoad,
           resolve: () => {}, reject: () => {},
         });

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyDataset, prepareImport, prepareImportTransaction, validateDataset } from "../src/services/dataset";
 import type { Dataset, GameVersion, ImportSelection, SaveFile } from "../src/services/models";
+import { datasetSummary } from "../src/services/summary";
+import { legacyPreferences, prepareLegacyDataset } from "../src/services/legacyMigration";
 
 const mocks = vi.hoisted(() => ({
   platform: {
@@ -9,6 +11,8 @@ const mocks = vi.hoisted(() => ({
     chooseFiles: vi.fn(), takeDroppedSources: vi.fn(), importDataset: vi.fn(),
     snapshotDirectory: vi.fn(), resolveDirectory: vi.fn(), scanDirectory: vi.fn(),
     clearDataset: vi.fn(),
+    openDataset: vi.fn(), activateArchive: vi.fn(),
+    readLegacySource: vi.fn(), stageLegacySource: vi.fn(), commitLegacyMigration: vi.fn(),
   },
   call: vi.fn(),
 }));
@@ -27,23 +31,44 @@ function deferred<T>() {
   return { promise, resolve };
 }
 let engines: Partial<Record<GameVersion, Dataset>>;
+let disks: Partial<Record<GameVersion, Dataset>>;
+let versions: Record<GameVersion, number>;
+function snapshot(game: GameVersion) {
+  return { identity: `${game}-${versions[game]}`, dataset: datasetSummary(disks[game] ?? emptyDataset()) };
+}
+function save(game: GameVersion, dataset: Dataset) {
+  disks[game] = structuredClone(dataset);
+  versions[game] += 1;
+  return snapshot(game);
+}
 beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
   engines = {};
+  disks = {};
+  versions = { sts1: 0, sts2: 0 };
   mocks.platform.loadPreferences.mockResolvedValue(null);
   mocks.platform.savePreferences.mockResolvedValue(undefined);
   mocks.platform.loadDataset.mockResolvedValue(null);
   mocks.platform.loadSourceDataset.mockResolvedValue(null);
-  mocks.platform.saveDataset.mockResolvedValue(undefined);
+  mocks.platform.openDataset.mockImplementation(async (game: GameVersion) => snapshot(game));
+  mocks.platform.saveDataset.mockImplementation(async (game: GameVersion, dataset: Dataset) => save(game, dataset));
+  mocks.platform.clearDataset.mockImplementation(async (game: GameVersion) => { delete disks[game]; versions[game] += 1; });
   mocks.platform.snapshotDirectory.mockResolvedValue("stable");
   mocks.platform.resolveDirectory.mockResolvedValue("/synthetic");
   mocks.platform.scanDirectory.mockResolvedValue([file()]);
   mocks.call.mockImplementation(async (game: GameVersion, request: Record<string, unknown>) => {
     if (request.op === "validateDataset") return validateDataset(request.dataset, game);
+    if (request.op === "prepareLegacyDataset") return prepareLegacyDataset(request.payload as Parameters<typeof prepareLegacyDataset>[0], request.previous as Dataset, game);
+    if (request.op === "legacyPreferences") return legacyPreferences(request.current as Parameters<typeof legacyPreferences>[0], request.values as Record<string, unknown>, request.mappings as Parameters<typeof legacyPreferences>[2]);
     if (request.op === "prepareImport") return prepareImport(request.previous as Dataset, request.files as SaveFile[], request.source as string, game);
     if (request.op === "prepareImportTransaction") return prepareImportTransaction(request.previous as Dataset, request.files as SaveFile[], request.source as string, game, request.current as Dataset);
     if (request.op === "serializeDataset") return JSON.stringify(request.dataset);
+    if (request.op === "open") {
+      if (!request.keepLoaded) engines[game] = structuredClone(disks[game] ?? emptyDataset());
+      return null;
+    }
+    if (request.op === "readDataset") return structuredClone(engines[game] ?? disks[game] ?? emptyDataset());
     if (request.op === "load") {
       const { op: _op, game: _game, ...dataset } = request;
       engines[game] = structuredClone(dataset) as unknown as Dataset;
@@ -72,7 +97,7 @@ describe("source and worker transactions", () => {
     const { useAppStore } = await import("../src/state/appStore");
     await useAppStore.getState().selectGame("sts2");
     const write = deferred<void>();
-    mocks.platform.saveDataset.mockReturnValue(write.promise);
+    mocks.platform.saveDataset.mockImplementationOnce(async (game: GameVersion, dataset: Dataset) => { await write.promise; return save(game, dataset); });
     const pending = useAppStore.getState().importFiles([file()], "/synthetic");
     await vi.waitFor(() => expect(mocks.platform.saveDataset).toHaveBeenCalled());
     const reload = useAppStore.getState().selectGame("sts2");
@@ -86,7 +111,7 @@ describe("source and worker transactions", () => {
     await useAppStore.getState().selectGame("sts2");
     mocks.platform.saveDataset.mockRejectedValue(new Error("Synthetic full disk"));
     await useAppStore.getState().importFiles([file()], "/synthetic");
-    expect(useAppStore.getState().dataset).toEqual(validateDataset(emptyDataset(), "sts2"));
+    expect(useAppStore.getState().dataset).toEqual(datasetSummary(validateDataset(emptyDataset(), "sts2")));
     expect(engines.sts2?.runs).toHaveLength(0);
     expect(useAppStore.getState().error).toContain("Synthetic full disk");
   });
@@ -165,7 +190,7 @@ describe("source and worker transactions", () => {
     const { useAppStore } = await import("../src/state/appStore");
     await useAppStore.getState().selectGame("sts2");
     const write = deferred<void>();
-    mocks.platform.saveDataset.mockReturnValueOnce(write.promise);
+    mocks.platform.saveDataset.mockImplementationOnce(async (game: GameVersion, dataset: Dataset) => { await write.promise; return save(game, dataset); });
     const importing = useAppStore.getState().importFiles([file()], "/synthetic");
     await vi.waitFor(() => expect(mocks.platform.saveDataset).toHaveBeenCalled());
     const clearing = useAppStore.getState().clearData();
@@ -189,5 +214,96 @@ describe("source and worker transactions", () => {
     await useAppStore.getState().importDirectory();
     expect(useAppStore.getState().syncSource).toBe("");
     expect(useAppStore.getState().error).toContain("Synthetic inaccessible");
+  });
+  it("commits every migrated source together and activates the chosen archive", async () => {
+    const { useAppStore } = await import("../src/state/appStore");
+    await useAppStore.getState().selectGame("sts2");
+    const staged = new Map<string, Dataset>();
+    const sources = ["one", "two"].map((id) => ({ id, game: "sts2" as const, source: `/synthetic/${id}`, active: id === "one", runs: 1, revisions: 1, importedAt: 10 }));
+    mocks.platform.readLegacySource.mockImplementation(async (_token: string, id: string) => ({
+      source: `/synthetic/${id}`, runs: [], progress: null,
+      dataset: await prepareImport(emptyDataset(), [file(id === "one" ? 100 : 200)], `/synthetic/${id}`, "sts2"),
+    }));
+    mocks.platform.stageLegacySource.mockImplementation(async (_token: string, id: string, text: string) => { staged.set(id, JSON.parse(text)); });
+    mocks.platform.commitLegacyMigration.mockImplementation(async (_token: string, _ids: string[], active: Partial<Record<GameVersion, string>>) => {
+      for (const [game, id] of Object.entries(active)) save(game as GameVersion, staged.get(id)!);
+    });
+    const completed = await useAppStore.getState().migrateLegacy({ token: "synthetic-token", sources,
+      preferences: { appearance: "dark", minimumSample: 9, favorites: ["synthetic.run"] } }, ["one", "two"], { sts2: "two" }, true);
+    expect(completed).toBe(true);
+    expect(mocks.platform.stageLegacySource).toHaveBeenCalledTimes(2);
+    expect(mocks.platform.commitLegacyMigration).toHaveBeenCalledOnce();
+    expect(mocks.platform.commitLegacyMigration).toHaveBeenCalledWith("synthetic-token", ["one", "two"], { sts2: "two" }, expect.any(Object));
+    expect(useAppStore.getState().dataset.source).toBe("/synthetic/two");
+    expect(useAppStore.getState().dataset.runs).toHaveLength(1);
+    expect(useAppStore.getState().settings).toMatchObject({ theme: "dark", minimumSample: 9, autoSync: false });
+    expect(useAppStore.getState().favorites).toContain("synthetic.run");
+    expect(useAppStore.getState().migrationStatus).toBeNull();
+  });
+  it("never commits a partially validated legacy migration", async () => {
+    const { useAppStore } = await import("../src/state/appStore");
+    await useAppStore.getState().selectGame("sts2");
+    const valid = await prepareImport(emptyDataset(), [file()], "/synthetic/one", "sts2");
+    mocks.platform.readLegacySource.mockImplementation(async (_token: string, id: string) => ({
+      source: `/synthetic/${id}`, dataset: id === "one" ? valid : { corrupted: true }, runs: [], progress: null,
+    }));
+    mocks.platform.stageLegacySource.mockResolvedValue(undefined);
+    const sources = ["one", "two"].map((id) => ({ id, game: "sts2" as const, source: `/synthetic/${id}`, active: false, runs: 1, revisions: 1, importedAt: 10 }));
+    const completed = await useAppStore.getState().migrateLegacy({ token: "synthetic-token", sources, preferences: null }, ["one", "two"], {}, false);
+    expect(completed).toBe(false);
+    expect(mocks.platform.stageLegacySource).toHaveBeenCalledOnce();
+    expect(mocks.platform.commitLegacyMigration).not.toHaveBeenCalled();
+    expect(useAppStore.getState().dataset.runs).toHaveLength(0);
+    expect(useAppStore.getState().migrationStatus).toBeNull();
+    expect(useAppStore.getState().error).toContain("本地数据格式无效");
+    mocks.platform.readLegacySource.mockResolvedValue({ source: "/synthetic/two",
+      dataset: { ...valid, source: "/synthetic/two" }, runs: [], progress: null });
+    const retried = await useAppStore.getState().migrateLegacy({ token: "synthetic-token", sources, preferences: null }, ["two"], {}, false);
+    expect(retried).toBe(true);
+    expect(mocks.platform.commitLegacyMigration).toHaveBeenCalledWith("synthetic-token", ["two"], {}, expect.any(Object));
+  });
+
+  it("updates the matching current source of a game that has not been opened", async () => {
+    const { useAppStore } = await import("../src/state/appStore");
+    await useAppStore.getState().selectGame("sts1");
+    disks.sts2 = await prepareImport(emptyDataset(), [file()], "/synthetic/shared", "sts2");
+    const incoming = await prepareImport(emptyDataset(), [file(200)], "/synthetic/shared", "sts2");
+    mocks.platform.readLegacySource.mockResolvedValue({ source: incoming.source, dataset: incoming, runs: [], progress: null });
+    let staged: Dataset;
+    mocks.platform.stageLegacySource.mockImplementation(async (_token: string, _id: string, text: string) => { staged = JSON.parse(text); });
+    mocks.platform.commitLegacyMigration.mockImplementation(async () => { save("sts2", staged); });
+    const sources = [{ id: "shared", game: "sts2" as const, source: incoming.source, active: true, runs: 1, revisions: 1, importedAt: 10 }];
+    expect(await useAppStore.getState().migrateLegacy({ token: "synthetic-token", sources, preferences: null }, ["shared"], {}, false)).toBe(true);
+    expect(mocks.platform.commitLegacyMigration).toHaveBeenCalledWith("synthetic-token", ["shared"], { sts2: "shared" }, expect.any(Object));
+    expect(disks.sts2?.runs).toHaveLength(2);
+    expect(useAppStore.getState().game).toBe("sts1");
+    expect(useAppStore.getState().dataset.runs).toHaveLength(0);
+    await useAppStore.getState().selectGame("sts2");
+    expect(useAppStore.getState().dataset.runs).toHaveLength(2);
+  });
+
+  it("keeps preference writes from crossing the complete migration transaction", async () => {
+    const { useAppStore } = await import("../src/state/appStore");
+    await useAppStore.getState().selectGame("sts2");
+    await vi.waitFor(() => expect(mocks.platform.savePreferences).toHaveBeenCalled());
+    const write = deferred<void>();
+    mocks.platform.commitLegacyMigration.mockReturnValue(write.promise);
+    const migrating = useAppStore.getState().migrateLegacy({ token: "synthetic-token", sources: [],
+      preferences: { appearance: "dark", favorites: ["migrated.run"] } }, [], {}, true);
+    await vi.waitFor(() => expect(mocks.platform.commitLegacyMigration).toHaveBeenCalled());
+    const count = mocks.platform.savePreferences.mock.calls.length;
+    useAppStore.getState().navigate("runs");
+    useAppStore.getState().setFilter({ ascensions: [10] });
+    useAppStore.getState().toggleFavorite("must-not-overwrite-migration.run");
+    useAppStore.getState().setSettings({ theme: "light" });
+    await useAppStore.getState().selectGame("sts1");
+    expect(mocks.platform.savePreferences).toHaveBeenCalledTimes(count);
+    expect(useAppStore.getState().game).toBe("sts2");
+    write.resolve();
+    expect(await migrating).toBe(true);
+    expect(useAppStore.getState().page).toBe("runs");
+    expect(useAppStore.getState().settings.theme).toBe("dark");
+    expect(useAppStore.getState().favorites).toEqual(["migrated.run"]);
+    expect(useAppStore.getState().filter.ascensions).toEqual([]);
   });
 });

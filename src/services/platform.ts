@@ -5,7 +5,24 @@ import type {
   ImportSelection,
   Preferences,
   StatsPlatform,
+  ArchiveSummary,
+  DatasetSnapshot,
+  LegacySelection,
+  LegacySourceData,
 } from "./models";
+import { ENGINE_VERSION } from "./cacheVersion";
+import { emptyDataset } from "./dataset";
+import { datasetSummary } from "./summary";
+
+async function browserSnapshot(game: "sts1" | "sts2"): Promise<DatasetSnapshot> {
+  const text = localStorage.getItem("sts2stats.dataset." + game);
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ENGINE_VERSION}|${text ?? "empty"}`));
+  return {
+    identity: Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    dataset: datasetSummary(text ? JSON.parse(text) : emptyDataset()),
+  };
+}
+const derivedPrefix = "sts2stats.derived.";
 
 function pickFiles(directory = false, json = false): Promise<File[]> {
   return new Promise((resolve) => {
@@ -79,6 +96,33 @@ const browser: StatsPlatform = {
     const value = localStorage.getItem("sts2stats.dataset." + game);
     return value ? JSON.parse(value) : null;
   },
+  openDataset: browserSnapshot,
+  async loadDatasetText(game, identity) {
+    if ((await browserSnapshot(game)).identity !== identity) throw new Error("本地数据已更新，请重新打开当前游戏");
+    return localStorage.getItem("sts2stats.dataset." + game);
+  },
+  async readDerived(game, identity, key) {
+    if ((await browserSnapshot(game)).identity !== identity) return null;
+    const path = `${derivedPrefix}${game}.${identity}.${key}`;
+    const text = localStorage.getItem(path);
+    if (!text) return null;
+    const value = JSON.parse(text);
+    localStorage.setItem(path, JSON.stringify({ ...value, accessed: Date.now() }));
+    return typeof value.text === "string" ? value.text : null;
+  },
+  async writeDerived(game, identity, key, text) {
+    if ((await browserSnapshot(game)).identity !== identity || text.length * 2 > 128 * 1024 * 1024) return;
+    const path = `${derivedPrefix}${game}.${identity}.${key}`;
+    localStorage.setItem(path, JSON.stringify({ text, accessed: Date.now() }));
+    const entries = Object.keys(localStorage).filter((entry) => entry.startsWith(`${derivedPrefix}${game}.`))
+      .map((entry) => ({ entry, text: localStorage.getItem(entry)! }));
+    entries.sort((a, b) => JSON.parse(b.text).accessed - JSON.parse(a.text).accessed);
+    let bytes = 0;
+    entries.forEach((entry, index) => {
+      bytes += entry.text.length * 2;
+      if (index >= 128 || bytes > 128 * 1024 * 1024) localStorage.removeItem(entry.entry);
+    });
+  },
   async saveDataset(game, dataset, _files, serialized) {
     const text = serialized ?? JSON.stringify(dataset);
     const archiveKey = "sts2stats.archive." + game + "." + dataset.source;
@@ -91,18 +135,36 @@ const browser: StatsPlatform = {
       else localStorage.setItem(archiveKey, previous);
       throw error;
     }
+    return browserSnapshot(game);
   },
   async importDataset() {
     const files = await pickFiles(false, true);
     return files.length ? JSON.parse(await files[0].text()) : null;
   },
+  async listArchives(game) {
+    return Object.keys(localStorage).filter((key) => key.startsWith("sts2stats.archive." + game + "."))
+      .map((key): ArchiveSummary => {
+        const dataset = JSON.parse(localStorage.getItem(key)!);
+        return { source: dataset.source, runs: dataset.runs.length, importedAt: dataset.importedAt };
+      });
+  },
+  async activateArchive(game, source) {
+    const text = localStorage.getItem("sts2stats.archive." + game + "." + source);
+    if (!text) throw new Error("未找到来源归档");
+    localStorage.setItem("sts2stats.dataset." + game, text);
+    return browserSnapshot(game);
+  },
+  async chooseLegacyData() { throw new Error("完整原应用迁移在桌面应用中可用；预览可导入 dataset.json"); },
+  async readLegacySource() { throw new Error("浏览器预览不支持原生归档迁移"); },
+  async stageLegacySource() { throw new Error("浏览器预览不支持原生归档迁移"); },
+  async commitLegacyMigration() { throw new Error("浏览器预览不支持原生归档迁移"); },
+  async cancelLegacyMigration() {},
   async exportText(name, text) {
     return download(name, new Blob([text], { type: "text/plain;charset=utf-8" }));
   },
   async exportBinary(name, data) {
-    if (data.length > 512 * 1024 * 1024 ||
-      data.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))
-      throw new Error("导出文件格式或大小无效");
+    if (data.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))
+      throw new Error("导出文件格式无效");
     return download(name, new Blob([new Uint8Array(data)]));
   },
   async loadPreferences() {
@@ -123,6 +185,7 @@ const browser: StatsPlatform = {
     for (const key of Object.keys(localStorage))
       if (key.startsWith("sts2stats.archive." + game + "."))
         localStorage.removeItem(key);
+      else if (key.startsWith(`${derivedPrefix}${game}.`)) localStorage.removeItem(key);
   },
 };
 const native: StatsPlatform = {
@@ -138,13 +201,25 @@ const native: StatsPlatform = {
   loadSourceDataset: (game, source) =>
     invoke<Dataset | null>("load_source_dataset", { game, source }),
   loadDataset: (game) => invoke<Dataset | null>("load_dataset", { game }),
+  openDataset: (game) => invoke<DatasetSnapshot>("open_dataset", { game, engineVersion: ENGINE_VERSION }),
+  loadDatasetText: (game, identity) => invoke<string | null>("load_dataset_text", { game, identity, engineVersion: ENGINE_VERSION }),
+  readDerived: (game, identity, key) => invoke<string | null>("read_derived", { game, identity, key, engineVersion: ENGINE_VERSION }),
+  writeDerived: (game, identity, key, text) => invoke("write_derived", { game, identity, key, text, engineVersion: ENGINE_VERSION }),
   saveDataset: (game, dataset, files, serialized) =>
-    invoke("save_dataset", {
+    invoke<DatasetSnapshot>("save_dataset", {
       game,
+      engineVersion: ENGINE_VERSION,
       text: serialized ?? JSON.stringify(dataset),
       files: files ?? [],
     }),
   importDataset: () => invoke<Dataset | null>("import_dataset"),
+  listArchives: (game) => invoke<ArchiveSummary[]>("list_archives", { game }),
+  activateArchive: (game, source) => invoke<DatasetSnapshot>("activate_archive", { game, source, engineVersion: ENGINE_VERSION }),
+  chooseLegacyData: (includePreferences) => invoke<LegacySelection | null>("choose_legacy_data", { includePreferences }),
+  readLegacySource: (token, id) => invoke<LegacySourceData>("read_legacy_source", { token, id }),
+  stageLegacySource: (token, id, text) => invoke("stage_legacy_source", { token, id, text }),
+  commitLegacyMigration: (token, ids, active, preferences) => invoke("commit_legacy_migration", { token, ids, active, preferences: JSON.stringify(preferences) }),
+  cancelLegacyMigration: (token) => invoke("cancel_legacy_migration", { token }),
   exportText: (name, text) => invoke<boolean>("export_text", { name, text }),
   exportBinary: (name, data) => invoke<boolean>("export_binary", { name, data }),
   loadPreferences: () => invoke<Preferences | null>("load_preferences"),

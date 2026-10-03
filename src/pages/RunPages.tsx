@@ -32,7 +32,7 @@ export function RunsPage({ coop = false }: { coop?: boolean }) {
 }
 
 function RunListPage({ coop, game }: { coop: boolean; game: GameVersion }) {
-  const { favorites, toggleFavorite, openRun, filter, revision } = useAppStore();
+  const { favorites, toggleFavorite, openRun, filter, revision, migrationStatus } = useAppStore();
   const filterKey = JSON.stringify(filter);
   const viewKey = `${game}/${coop}`;
   const saved = runListStates.get(viewKey);
@@ -93,6 +93,7 @@ function RunListPage({ coop, game }: { coop: boolean; game: GameVersion }) {
           </tr></thead>
           <tbody>{data?.runs.map((run) => <tr key={run.id}>
             <td><button className="favorite-button" aria-label={favorites.includes(run.id) ? "取消收藏" : "收藏记录"}
+              disabled={!!migrationStatus}
               aria-pressed={favorites.includes(run.id)} onClick={() => toggleFavorite(run.id)}>
               <Star size={15} fill={favorites.includes(run.id) ? "var(--gold)" : "none"}
                 color={favorites.includes(run.id) ? "var(--gold)" : "var(--muted)"} />
@@ -171,23 +172,48 @@ const charts: { title: string; series: ReplaySeries[] }[] = [
 ];
 
 function RunBaseline({ run }: { run: NormalizedRunV2 }) {
+  const { settings, setSettings, openObject, game, busy } = useAppStore();
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const { data, loading, error } = useAnalysis<AnalysisResult>({
     op: "query", filter: { characters: [run.character], ascensions: [run.ascension] },
     query: { id: "run-baseline", dataSource: "runs", metricIds: ["sample", "win_rate", "avg_floor", "avg_duration"],
       dimensionIds: [], filter: EMPTY_FILTER, sort: [], limit: 1, visualization: "table" },
   });
   const row = data?.rows[0];
+  const visible = row && row.sample >= settings.minimumSample;
   const value = (field: string) => typeof row?.values[field] === "number" ? row.values[field] as number : null;
+  async function exportBaseline() {
+    if (!data) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const text = await analysisClient(game).call<string>({ op: "csv", result: data });
+      await platform.exportText(`${game}-run-baseline.csv`, text);
+    } catch (reason) { setExportError(String(reason)); }
+    finally { setExporting(false); }
+  }
   return <Card title="同角色、同进阶基准"
+    actions={<button disabled={!data || loading || exporting} onClick={() => void exportBaseline()}>导出 CSV</button>}
     help="保留当前日期、版本、模式及其他筛选条件，限定为同角色同进阶的单人记录。胜率不计放弃局。">
-    {error ? <ErrorState error={error} /> : !row ? <EmptyState>{loading ? "正在分析…" : "没有符合条件的记录"}</EmptyState> :
+    <ErrorState error={exportError} />
+    {error ? <ErrorState error={error} /> : !visible ? <EmptyState>{loading ? "正在分析…" : row ? "样本低于最低样本量" : "没有符合条件的记录"}</EmptyState> :
       <div className="table-scroll" aria-busy={loading}><table>
         <thead><tr><th>角色</th><th>进阶</th><th>对局</th><th>胜率</th><th>平均到达层</th><th>平均局时</th></tr></thead>
-        <tbody><tr><td style={{ color: characterColor(run.character) }}>{zhCharacter(run.character)}</td><td>A{run.ascension}</td>
+        <tbody><tr><td><button className="object-link" style={{ color: characterColor(run.character) }} onClick={() => openObject("character", run.character)}>{zhCharacter(run.character)}</button></td><td>A{run.ascension}</td>
           <td>{formatValue(value("sample"))}</td><td><ObjectNumericCell value={value("win_rate")} format="percent" semantic="rate" /></td>
           <td>{formatValue(value("avg_floor"))}</td><td>{formatValue(value("avg_duration"), "duration")}</td>
         </tr></tbody>
       </table></div>}
+    {data && <details className="baseline-evidence"><summary>样本与统计口径</summary>
+      <dl className="details"><dt>有效观测</dt><dd>{data.sample.eligible}</dd>
+        <dt>排除观测</dt><dd>{data.sample.excluded}</dd><dt>最低样本量</dt><dd>{settings.minimumSample}</dd>
+        <dt>可靠度</dt><dd>{{ strong: "较充足", moderate: "中等", limited: "有限" }[data.reliability]}</dd>
+        <dt>胜率 95% 区间</dt><dd>{data.confidence.filter((item) => item.key === "win_rate").map((item) => `${formatValue(item.low, "percent")}–${formatValue(item.high, "percent")}`).join(" · ") || "—"}</dd>
+      </dl>
+      {!!data.warnings.length && <ul>{data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+      {settings.minimumSample > 1 && <button disabled={busy} onClick={() => setSettings({ minimumSample: 1 })}>显示全部样本</button>}
+    </details>}
   </Card>;
 }
 
@@ -202,7 +228,7 @@ function RawJsonCard({ id }: { id: string }) {
 }
 
 export function RunDetailPage({ id }: { id: string }) {
-  const { favorites, toggleFavorite, game } = useAppStore();
+  const { favorites, toggleFavorite, game, migrationStatus } = useAppStore();
   const [player, setPlayer] = useState(0);
   const [selected, setSelected] = useState(0);
   const [rawVisible, setRawVisible] = useState(false);
@@ -237,7 +263,7 @@ export function RunDetailPage({ id }: { id: string }) {
     <div className="page-tools" data-analysis-ready={!loading ? "true" : undefined}>
       <span style={{ color: characterColor(active.character) }}>{zhCharacter(active.character)} · A{data.ascension}</span>
       <span>{formatValue(data.startTime, "date")} · {zhStatus(data.status)}</span>
-      <button aria-pressed={favorites.includes(id)} onClick={() => toggleFavorite(id)}>
+      <button disabled={!!migrationStatus} aria-pressed={favorites.includes(id)} onClick={() => toggleFavorite(id)}>
         <Star size={15} fill={favorites.includes(id) ? "var(--gold)" : "none"} />{favorites.includes(id) ? "已收藏" : "收藏"}
       </button>
       {data.players.length > 1 && <label>玩家视角<select aria-label="玩家视角" value={player} onChange={(event) => {

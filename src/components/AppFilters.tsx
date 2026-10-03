@@ -28,7 +28,7 @@ function ChoiceSet<T extends string | number>({ title, options, selected, label,
 }
 
 export function AppFilters() {
-  const { filter, setFilter, resetFilter, characters, dataset } = useAppStore();
+  const { filter, setFilter, resetFilter, characters, dataset, page, migrationStatus } = useAppStore();
   const [expanded, setExpanded] = useState(false);
   const [multi, setMulti] = useState(false);
   const tokens = activeFilterTokens(filter);
@@ -40,7 +40,7 @@ export function AppFilters() {
   const selection = (values: (string | number)[]) => values.length > 1 ? multipleValue : values[0] ?? "";
   const multipleOption = (values: (string | number)[]) => values.length > 1
     ? <option value={multipleValue} disabled>{values.length} 项已选</option> : null;
-  return <div className="filters">
+  return <fieldset className="filters" disabled={!!migrationStatus} aria-label="筛选条件">
     <div className="filter-primary">
       <label>角色<select value={selection(filter.characters)} onChange={(event) => setFilter({ characters: event.target.value ? [event.target.value] : [] })}>
         <option value="">全部角色</option>{multipleOption(filter.characters)}
@@ -81,7 +81,7 @@ export function AppFilters() {
         <input type="number" min="0" value={filter[key] == null ? "" : filter[key]! / 60}
           onChange={(event) => setFilter({ [key]: event.target.value === "" ? null : Math.max(0, Number(event.target.value)) * 60 })} />
       </label>)}
-      {(["includeCards", "excludeCards", "includeRelics", "excludeRelics"] as const).map((key, index) =>
+      {!["dashboard", "rest"].includes(page) && (["includeCards", "excludeCards", "includeRelics", "excludeRelics"] as const).map((key, index) =>
         <ObjectIDsInput key={key} label={["包含卡牌 ID", "排除卡牌 ID", "包含遗物 ID", "排除遗物 ID"][index]} values={filter[key]} onChange={(values) => setFilter({ [key]: values })} />)}
     </div>}
     {multi && <div className="filter-multi">
@@ -95,5 +95,5 @@ export function AppFilters() {
       {tokens.map((token) => <button key={token.key} className="filter-token" onClick={() => setFilter(removeFilterPatch(token.key))}
         title={`移除筛选：${token.title}`} aria-label={`移除筛选：${token.title}`}>{token.title}<X size={13} /></button>)}
     </div>}
-  </div>;
+  </fieldset>;
 }

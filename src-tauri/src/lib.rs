@@ -12,14 +12,30 @@ use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use walkdir::WalkDir;
 
-const MAX_FILE: u64 = 32 * 1024 * 1024;
-const MAX_DATASET: u64 = 512 * 1024 * 1024;
-const MAX_FILES: usize = 50_000;
+mod legacy;
+mod storage_cache;
+
 struct Storage {
     root: PathBuf,
     authorized: Mutex<HashSet<PathBuf>>,
     writes: Mutex<()>,
     dropped: Mutex<Vec<PathBuf>>,
+    legacy: Mutex<Option<legacy::Session>>,
+    _instance_lock: Option<fs::File>,
+}
+fn lock_storage(root: &Path) -> Result<fs::File, String> {
+    let path = root.join(".instance.lock");
+    confined_storage_path(root, &path)?;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(error)?;
+    file.try_lock()
+        .map_err(|failure| format!("应用数据正在另一实例使用，请关闭另一实例后重试：{failure}"))?;
+    Ok(file)
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,7 +121,7 @@ fn read_save(path: &Path) -> Result<SaveFile, String> {
     }
     let before = fs::metadata(path).map_err(error)?;
     let stamp = before.modified().map_err(error)?;
-    let text = read_text(path, MAX_FILE)?;
+    let text = read_text(path, u64::MAX)?;
     let after = fs::metadata(path).map_err(error)?;
     if file_stamp(&after)? != file_stamp(&before)? {
         return Err("Save changed during reading; retry later".into());
@@ -221,9 +237,6 @@ fn scan(root: &Path) -> Result<Vec<SaveFile>, String> {
         if entry.file_type().is_file() && is_save(entry.path()) {
             paths.push(entry.into_path());
         }
-        if paths.len() > MAX_FILES {
-            return Err("Too many save files".into());
-        }
     }
     if paths
         .iter()
@@ -237,14 +250,9 @@ fn scan(root: &Path) -> Result<Vec<SaveFile>, String> {
         return Err("发现多个 progress.save，请选择单一账号或 Profile 的存档文件夹".into());
     }
     paths.sort();
-    let mut total = 0usize;
     let mut files = Vec::new();
     for path in paths {
         let file = read_save(&path)?;
-        total += file.text.len();
-        if total as u64 > MAX_DATASET {
-            return Err("Save selection exceeds 512 MiB".into());
-        }
         files.push(file);
     }
     Ok(files)
@@ -263,9 +271,6 @@ fn fingerprint(root: &Path) -> Result<String, String> {
         if entry.file_type().is_file() && is_save(entry.path()) {
             let meta = entry.metadata().map_err(error)?;
             stamps.push(format!("{}|{}", entry.path().display(), file_stamp(&meta)?));
-        }
-        if stamps.len() > MAX_FILES {
-            return Err("Too many save files".into());
         }
     }
     stamps.sort();
@@ -307,17 +312,7 @@ async fn load_source_dataset(
     background(move || {
         let storage = app.state::<Storage>();
         let _lock = storage.writes.lock().map_err(error)?;
-        let path = game_dir(&storage, &game)?
-            .join("archives")
-            .join(hash(source.as_bytes()))
-            .join("dataset.json");
-        confined_storage_path(&storage.root, &path)?;
-        if !path.exists() {
-            return Ok(None);
-        }
-        serde_json::from_str(&read_text(&path, MAX_DATASET)?)
-            .map(Some)
-            .map_err(error)
+        legacy::load_archive(&game_dir(&storage, &game)?, &game, &source)
     })
     .await
 }
@@ -341,7 +336,7 @@ struct StagedFiles {
 impl StagedFiles {
     fn put(&mut self, path: PathBuf, text: &str) -> Result<(), String> {
         if path.exists() {
-            if read_text(&path, MAX_DATASET)? != text {
+            if read_text(&path, u64::MAX)? != text {
                 return Err("本地归档校验失败".into());
             }
         } else {
@@ -411,7 +406,7 @@ fn prune_progress(archive: &Path, current: &Value) {
 fn commit_dataset(root: &Path, archive: &Path, text: &str) -> Result<(), String> {
     let checkpoint = archive.join("dataset.json");
     let previous = if checkpoint.exists() {
-        Some(read_text(&checkpoint, MAX_DATASET)?)
+        Some(read_text(&checkpoint, u64::MAX)?)
     } else {
         None
     };
@@ -463,9 +458,6 @@ fn directory_selection(storage: &Storage, directory: PathBuf) -> Result<Selectio
     })
 }
 fn selected_files(storage: &Storage, paths: Vec<PathBuf>) -> Result<Vec<SaveFile>, String> {
-    if paths.len() > MAX_FILES {
-        return Err("Too many save files".into());
-    }
     let mut paths = paths
         .into_iter()
         .map(|path| path.canonicalize().map_err(error))
@@ -473,16 +465,11 @@ fn selected_files(storage: &Storage, paths: Vec<PathBuf>) -> Result<Vec<SaveFile
     paths.sort();
     paths.dedup();
     let mut files = Vec::new();
-    let mut total = 0usize;
     for path in paths {
         if path.starts_with(&storage.root) {
             return Err("Source and application storage must not overlap".into());
         }
         let file = read_save(&path)?;
-        total += file.text.len();
-        if total as u64 > MAX_DATASET {
-            return Err("Save selection exceeds 512 MiB".into());
-        }
         files.push(file);
     }
     Ok(files)
@@ -494,9 +481,6 @@ async fn take_dropped_sources(app: tauri::AppHandle) -> Result<Option<Selection>
         let mut paths = std::mem::take(&mut *storage.dropped.lock().map_err(error)?);
         if paths.is_empty() {
             return Ok(None);
-        }
-        if paths.len() > MAX_FILES {
-            return Err("Too many dropped files".into());
         }
         if paths.len() == 1 && paths[0].is_dir() {
             return directory_selection(&storage, paths.remove(0).canonicalize().map_err(error)?)
@@ -577,7 +561,7 @@ async fn load_dataset(app: tauri::AppHandle, game: String) -> Result<Option<Valu
         if !path.exists() {
             return Ok(None);
         }
-        serde_json::from_str(&read_text(&path, MAX_DATASET)?)
+        serde_json::from_str(&read_text(&path, u64::MAX)?)
             .map(Some)
             .map_err(error)
     })
@@ -587,13 +571,11 @@ async fn load_dataset(app: tauri::AppHandle, game: String) -> Result<Option<Valu
 async fn save_dataset(
     app: tauri::AppHandle,
     game: String,
+    engine_version: String,
     text: String,
     files: Vec<SaveFile>,
-) -> Result<(), String> {
+) -> Result<storage_cache::Snapshot, String> {
     background(move || {
-        if text.len() as u64 > MAX_DATASET {
-            return Err("Dataset exceeds 512 MiB".into());
-        }
         let value: Value = serde_json::from_str(&text).map_err(error)?;
         let runs = value
             .get("runs")
@@ -617,19 +599,16 @@ async fn save_dataset(
         let storage = app.state::<Storage>();
         let _lock = storage.writes.lock().map_err(error)?;
         let root = game_dir(&storage, &game)?;
+        storage_cache::identity(&root, &game, &engine_version)?;
+        storage_cache::summary(&value)?;
         // Immutable accepted revisions live in app storage, never in source folders.
         let archive = root.join("archives").join(hash(source.as_bytes()));
         confined_storage_path(&storage.root, &archive)?;
         confined_storage_path(&storage.root, &archive.join("blobs"))?;
         confined_storage_path(&storage.root, &archive.join("runs"))?;
-        if files.len() > MAX_FILES
-            || files.iter().map(|f| f.text.len()).sum::<usize>() as u64 > MAX_DATASET
-        {
-            return Err("Archive selection too large".into());
-        }
         let mut staged = StagedFiles::default();
         for file in files {
-            if file.text.len() as u64 > MAX_FILE || !is_save(Path::new(&file.name)) {
+            if !is_save(Path::new(&file.name)) {
                 return Err("Invalid archive save".into());
             }
             let suffix = if file.name.to_lowercase().ends_with(".run") {
@@ -657,7 +636,7 @@ async fn save_dataset(
         }
         staged.committed = true;
         prune_progress(&archive, &value);
-        Ok(())
+        storage_cache::committed(&root, &game, &engine_version, &value)
     })
     .await
 }
@@ -672,16 +651,13 @@ async fn import_dataset(app: tauri::AppHandle) -> Result<Option<Value>, String> 
         else {
             return Ok(None);
         };
-        serde_json::from_str(&read_text(&file.into_path().map_err(error)?, MAX_DATASET)?)
+        serde_json::from_str(&read_text(&file.into_path().map_err(error)?, u64::MAX)?)
             .map(Some)
             .map_err(error)
     })
     .await
 }
 fn export_bytes(app: &tauri::AppHandle, name: &str, bytes: &[u8]) -> Result<bool, String> {
-    if bytes.len() as u64 > MAX_DATASET {
-        return Err("Export too large".into());
-    }
     let name = Path::new(name)
         .file_name()
         .ok_or("Invalid filename")?
@@ -731,7 +707,7 @@ async fn load_preferences(app: tauri::AppHandle) -> Result<Option<Value>, String
         if !path.exists() {
             return Ok(None);
         }
-        serde_json::from_str(&read_text(&path, 1024 * 1024)?)
+        serde_json::from_str(&read_text(&path, u64::MAX)?)
             .map(Some)
             .map_err(error)
     })
@@ -740,9 +716,6 @@ async fn load_preferences(app: tauri::AppHandle) -> Result<Option<Value>, String
 #[tauri::command]
 async fn save_preferences(app: tauri::AppHandle, text: String) -> Result<(), String> {
     background(move || {
-        if text.len() > 1024 * 1024 {
-            return Err("Preferences too large".into());
-        }
         let _: Value = serde_json::from_str(&text).map_err(error)?;
         let storage = app.state::<Storage>();
         let _lock = storage.writes.lock().map_err(error)?;
@@ -804,17 +777,25 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let root = app.path().app_data_dir()?;
-            fs::create_dir_all(&root)?;
-            let root = root.canonicalize()?;
-            let authorized = fs::read_to_string(root.join("authorized.json"))
-                .ok()
-                .and_then(|t| serde_json::from_str(&t).ok())
-                .unwrap_or_default();
+            let (root, instance_lock, authorized) =
+                tauri::async_runtime::block_on(background(move || {
+                    fs::create_dir_all(&root).map_err(error)?;
+                    let root = root.canonicalize().map_err(error)?;
+                    let instance_lock = lock_storage(&root)?;
+                    legacy::recover(&root)?;
+                    let authorized = fs::read_to_string(root.join("authorized.json"))
+                        .ok()
+                        .and_then(|text| serde_json::from_str::<HashSet<PathBuf>>(&text).ok())
+                        .unwrap_or_default();
+                    Ok((root, instance_lock, authorized))
+                }))?;
             app.manage(Storage {
                 root,
                 authorized: Mutex::new(authorized),
                 writes: Mutex::new(()),
                 dropped: Mutex::new(Vec::new()),
+                legacy: Mutex::default(),
+                _instance_lock: Some(instance_lock),
             });
             Ok(())
         })
@@ -823,6 +804,17 @@ pub fn run() {
             snapshot_directory,
             resolve_directory,
             load_source_dataset,
+            storage_cache::open_dataset,
+            storage_cache::load_dataset_text,
+            storage_cache::read_derived,
+            storage_cache::write_derived,
+            storage_cache::list_archives,
+            storage_cache::activate_archive,
+            legacy::choose_legacy_data,
+            legacy::read_legacy_source,
+            legacy::stage_legacy_source,
+            legacy::commit_legacy_migration,
+            legacy::cancel_legacy_migration,
             choose_directory,
             choose_files,
             scan_directory,
@@ -861,6 +853,8 @@ mod tests {
             authorized: Mutex::default(),
             writes: Mutex::default(),
             dropped: Mutex::default(),
+            legacy: Mutex::default(),
+            _instance_lock: None,
         };
         let root = source.path().canonicalize().unwrap();
         let first = directory_selection(&storage, root.clone()).unwrap();
@@ -889,7 +883,7 @@ mod tests {
             assert!(staged.put(accepted.clone(), "corrupted").is_err());
         }
         assert!(!staged_path.exists());
-        assert_eq!(read_text(&accepted, MAX_FILE).unwrap(), "old");
+        assert_eq!(read_text(&accepted, u64::MAX).unwrap(), "old");
     }
     #[test]
     fn progress_archives_are_bounded_and_current_revision_is_retained() {
@@ -937,6 +931,17 @@ mod tests {
         assert!(scan(dir.path()).is_err());
     }
     #[test]
+    fn reads_valid_saves_above_the_retired_32_mib_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large-synthetic.run");
+        let text = format!("{{\"win\":true}}{}", " ".repeat(33 * 1024 * 1024));
+        fs::write(&path, &text).unwrap();
+        let save = read_save(&path).unwrap();
+        assert_eq!(save.text.len(), text.len());
+        assert!(serde_json::from_str::<Value>(&save.text).is_ok());
+        assert_eq!(fs::metadata(path).unwrap().len(), text.len() as u64);
+    }
+    #[test]
     fn failed_commit_preserves_source_checkpoint() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("archives/source");
@@ -960,6 +965,8 @@ mod tests {
             authorized: Mutex::default(),
             writes: Mutex::default(),
             dropped: Mutex::default(),
+            legacy: Mutex::default(),
+            _instance_lock: None,
         };
         assert!(game_dir(&s, "../../anything").is_err());
     }
@@ -978,7 +985,17 @@ mod tests {
             authorized: Mutex::default(),
             writes: Mutex::default(),
             dropped: Mutex::default(),
+            legacy: Mutex::default(),
+            _instance_lock: None,
         };
         assert!(game_dir(&storage, "sts2").is_err());
+    }
+    #[test]
+    fn prevents_concurrent_instances_from_recovering_or_overwriting_live_migrations() {
+        let root = tempfile::tempdir().unwrap();
+        let first = lock_storage(root.path()).unwrap();
+        assert!(lock_storage(root.path()).is_err());
+        drop(first);
+        assert!(lock_storage(root.path()).is_ok());
     }
 }

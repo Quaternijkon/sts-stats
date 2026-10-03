@@ -96,7 +96,7 @@ async function digest(text: string): Promise<string> {
     b.toString(16).padStart(2, "0"),
   ).join("");
 }
-async function runKey(run: NormalizedRunV2): Promise<string> {
+export async function runKey(run: NormalizedRunV2): Promise<string> {
   return digest(
     stable(
       run.startTime > 0 && run.seed

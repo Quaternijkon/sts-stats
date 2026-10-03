@@ -8,6 +8,7 @@ import { Card, ErrorState, MetricGrid, MetricTile } from "../components/UI";
 import { formatValue } from "../styles/theme";
 import { zhCharacter } from "../../Engine/domain/i18n";
 import type { StorageSummary } from "../worker/operations";
+import { LegacyMigration, SourceArchives } from "./local/LegacyMigration";
 
 function progressCount(row: Record<string, unknown>, key: "wins" | "losses") {
   if (Array.isArray(row.recordedFields) && !row.recordedFields.includes(key)) return "—";
@@ -32,10 +33,10 @@ function DataDirectory() {
 }
 
 export function SaveSyncControls() {
-  const { settings, setSettings, busy, sync, syncSource, syncStatus, syncError, lastSyncedAt } = useAppStore();
+  const { settings, setSettings, busy, sync, syncSource, syncStatus, syncError, lastSyncedAt, migrationStatus } = useAppStore();
   return <div className="sync-state">
     <label title={syncSource ? "应用运行时单向归档来源目录，来源删除不会移除已导入历史" : "先选择存档文件夹以启用自动同步"}>
-      自动同步<input type="checkbox" checked={settings.autoSync} disabled={!syncSource}
+      自动同步<input type="checkbox" checked={settings.autoSync} disabled={!syncSource || !!migrationStatus}
         onChange={(event) => setSettings({ autoSync: event.target.checked })} />
     </label>
     <dl className="details">
@@ -102,6 +103,8 @@ export function LocalDataPage() {
             ? dataset.progress.characterStats.map((row) => `${zhCharacter(row.character)} ${progressCount(row, "wins")} / ${progressCount(row, "losses")}`).join(" · ") : "—"}</dd></>}
       </dl>
     </Card>
+    <LegacyMigration />
+    <SourceArchives />
     <Card title="自动同步"><SaveSyncControls /></Card>
     <Card title="应用数据"><DataDirectory /><div className="action-row"><button onClick={() => navigate("settings")}>设置</button></div></Card>
     <Card title="清除本地数据"><ClearDataControls /></Card>
@@ -109,13 +112,13 @@ export function LocalDataPage() {
 }
 
 export function SettingsPage() {
-  const { settings, setSettings } = useAppStore();
+  const { settings, setSettings, busy } = useAppStore();
   return <div style={{ display: "contents" }} data-analysis-ready="true">
     <Card title="偏好"><div className="settings-list">
-      <label>外观<select value={settings.theme} onChange={(event) => setSettings({ theme: event.target.value as typeof settings.theme })}>
+      <label>外观<select disabled={busy} value={settings.theme} onChange={(event) => setSettings({ theme: event.target.value as typeof settings.theme })}>
         <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
       </select></label>
-      <label title="样本量低于此值的分组在数据表中隐藏">最低样本量<input type="number" min="1" max="1000" value={settings.minimumSample}
+      <label title="样本量低于此值的分组在数据表中隐藏">最低样本量<input disabled={busy} type="number" min="1" max="1000" value={settings.minimumSample}
         onChange={(event) => setSettings({ minimumSample: Math.max(1, Math.min(1000, Math.floor(Number(event.target.value) || 1))) })} /></label>
     </div></Card>
     <Card title="自动同步"><SaveSyncControls /></Card>

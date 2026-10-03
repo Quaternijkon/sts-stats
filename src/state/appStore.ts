@@ -6,9 +6,10 @@ import { analysisClient } from "../worker/client";
 import { platform } from "../services/platform";
 import { emptyDataset } from "../services/dataset";
 import type { ImportTransaction } from "../services/dataset";
-import type { Dataset, GameVersion, FilterSpec, Preferences, SaveFile } from "../services/models";
+import type { Dataset, DatasetSnapshot, DatasetSummary, GameVersion, FilterSpec, Preferences, SaveFile, LegacySelection } from "../services/models";
 
 const defaults: Preferences = {
+  selectedGame: "sts2",
   theme: "system", minimumSample: 1, autoSync: true,
   games: {
     sts1: { source: "", favorites: [], autoSync: true },
@@ -21,7 +22,7 @@ let selection = 0;
 let initialization: Promise<void> | null = null;
 let activeOperation: Promise<void> | null = null;
 const pages: Record<GameVersion, string> = { sts1: "dashboard", sts2: "dashboard" };
-const loaded: Partial<Record<GameVersion, Dataset>> = {};
+const loaded: Partial<Record<GameVersion, DatasetSnapshot>> = {};
 const engineQueues: Record<GameVersion, Promise<void>> = {
   sts1: Promise.resolve(), sts2: Promise.resolve(),
 };
@@ -42,6 +43,11 @@ function filterScope(page: string): string {
   if (page.startsWith("run/")) return "detail/run";
   return page;
 }
+function pageFilter(page: string, filter: FilterSpec): FilterSpec {
+  return ["dashboard", "rest"].includes(page) ? {
+    ...filter, party: "all", includeCards: [], excludeCards: [], includeRelics: [], excludeRelics: [],
+  } : { ...filter, party: "all" };
+}
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -58,6 +64,7 @@ function withEngine<T>(game: GameVersion, operation: () => Promise<T>): Promise<
 }
 function cleanPreferences(value: Preferences): Preferences {
   const result = structuredClone(defaults);
+  if (value.selectedGame === "sts1" || value.selectedGame === "sts2") result.selectedGame = value.selectedGame;
   if (["system", "light", "dark"].includes(value.theme)) result.theme = value.theme;
   if (Number.isInteger(value.minimumSample))
     result.minimumSample = Math.max(1, Math.min(1000, value.minimumSample));
@@ -71,13 +78,15 @@ function cleanPreferences(value: Preferences): Preferences {
       autoSync: typeof saved.autoSync === "boolean" ? saved.autoSync : result.autoSync,
     };
     if (Number.isFinite(saved.lastSyncedAt)) result.games[game].lastSyncedAt = saved.lastSyncedAt;
+    if (typeof saved.legacyAutoSync === "boolean") result.games[game].legacyAutoSync = saved.legacyAutoSync;
+    if (Array.isArray(saved.savedQueries)) result.games[game].savedQueries = saved.savedQueries;
     const filter = filterSpecSchema.safeParse(saved.filter);
     if (filter.success) result.games[game].filter = filter.data;
     if (saved.pageFilters && typeof saved.pageFilters === "object") {
       result.games[game].pageFilters = {};
       for (const [page, value] of Object.entries(saved.pageFilters)) {
         const parsed = filterSpecSchema.safeParse(value);
-        if (parsed.success) result.games[game].pageFilters![page] = parsed.data;
+        if (parsed.success) result.games[game].pageFilters![page] = pageFilter(page, parsed.data);
       }
     }
   }
@@ -86,10 +95,11 @@ function cleanPreferences(value: Preferences): Preferences {
 interface AppState {
   game: GameVersion;
   page: string;
-  dataset: Dataset;
+  dataset: DatasetSummary;
   characters: string[];
   filter: FilterSpec;
   revision: number;
+  archiveRevision: number;
   ready: boolean;
   busy: boolean;
   error: string | null;
@@ -99,6 +109,7 @@ interface AppState {
   syncStatus: string;
   syncError: string | null;
   lastSyncedAt: number | null;
+  migrationStatus: string | null;
   initialize(): Promise<void>;
   selectGame(game: GameVersion): Promise<void>;
   navigate(page: string): void;
@@ -116,6 +127,8 @@ interface AppState {
   sync(immediately?: boolean): Promise<void>;
   syncAll(immediately?: boolean): Promise<void>;
   importExistingDataset(): Promise<void>;
+  restoreArchive(source: string): Promise<void>;
+  migrateLegacy(selection: LegacySelection, ids: string[], active: Partial<Record<GameVersion, string>>, usePreferences: boolean): Promise<boolean>;
   clearData(): Promise<void>;
   dismissError(): void;
 }
@@ -142,15 +155,17 @@ export const useAppStore = create<AppState>((set, get) => {
       syncError: syncStates[game].error, lastSyncedAt: saved.lastSyncedAt ?? null,
       settings: { ...get().settings, autoSync: saved.autoSync ?? preferences.autoSync } });
   }
-  function publishDataset(game: GameVersion, dataset: Dataset) {
-    loaded[game] = dataset;
+  function publishDataset(game: GameVersion, snapshot: DatasetSnapshot) {
+    const changed = loaded[game]?.identity !== snapshot.identity;
+    loaded[game] = snapshot;
     if (get().game !== game) return;
+    const dataset = snapshot.dataset;
     setCurrentGame(game);
     const characters = [...setGameCharacters([
       ...dataset.runs.flatMap((r) => [r.character, ...r.players.map((p) => p.character)]),
       ...(dataset.progress?.characterStats ?? []).map((s) => s.character),
     ])];
-    set((state) => ({ dataset, characters, ready: true, revision: state.revision + 1 }));
+    set((state) => ({ dataset, characters, ready: true, revision: state.revision + (changed ? 1 : 0) }));
   }
   function stopSource(game: GameVersion) {
     generations[game] += 1;
@@ -174,24 +189,27 @@ export const useAppStore = create<AppState>((set, get) => {
     persist();
   }
   async function currentDataset(game: GameVersion): Promise<Dataset> {
-    const existing = loaded[game];
-    if (existing) return existing;
-    const dataset = await analysisClient(game).call<Dataset>({ op: "validateDataset", game,
-      dataset: await platform.loadDataset(game) ?? emptyDataset() });
-    loaded[game] = dataset;
-    return dataset;
+    const snapshot = await platform.openDataset(game);
+    await analysisClient(game).call({ op: "open", game, snapshot });
+    if (get().ready && loaded[game]?.identity !== snapshot.identity) publishDataset(game, snapshot);
+    else loaded[game] = snapshot;
+    return analysisClient(game).call<Dataset>({ op: "readDataset" });
   }
   async function commit(game: GameVersion, dataset: Dataset, previous: Dataset, files?: SaveFile[], serialized?: string) {
     // Validate worker loading before publishing disk state; restore it if writing fails.
+    const checkpoint = loaded[game] ?? await platform.openDataset(game);
     await analysisClient(game).call({ op: "load", game, ...dataset });
+    let snapshot: DatasetSnapshot;
     try {
       const text = serialized ?? await analysisClient(game).call<string>({ op: "serializeDataset", dataset });
-      await platform.saveDataset(game, dataset, files, text);
+      snapshot = await platform.saveDataset(game, dataset, files, text);
     } catch (error) {
       await analysisClient(game).call({ op: "load", game, ...previous });
+      await analysisClient(game).call({ op: "open", game, snapshot: checkpoint, keepLoaded: true });
       throw error;
     }
-    publishDataset(game, dataset);
+    await analysisClient(game).call({ op: "open", game, snapshot, keepLoaded: true });
+    publishDataset(game, snapshot);
   }
   async function importForGame(game: GameVersion, files: SaveFile[], source: string, generation: number, accept = () => true) {
     const previous = await currentDataset(game);
@@ -205,7 +223,7 @@ export const useAppStore = create<AppState>((set, get) => {
     });
     if (generation !== generations[game] || !accept()) return false;
     if (transaction.changed) await commit(game, transaction.dataset, previous, files, transaction.serialized);
-    else if (get().game === game && !get().ready) publishDataset(game, previous);
+    else if (get().game === game && !get().ready && loaded[game]) publishDataset(game, loaded[game]!);
     return true;
   }
   async function operation(game: GameVersion, action: () => Promise<void>, clearError = true) {
@@ -227,7 +245,8 @@ export const useAppStore = create<AppState>((set, get) => {
     stopSource(game);
     if (!await importForGame(game, files, source, generations[game])) return;
     preferences.games[game].source = directory;
-    preferences.games[game].autoSync = !!directory;
+    preferences.games[game].autoSync = !!directory && (preferences.games[game].legacyAutoSync ?? true);
+    delete preferences.games[game].legacyAutoSync;
     recordSuccess(game);
   }
   async function chooseSource<T>(game: GameVersion, choose: () => Promise<T>): Promise<T> {
@@ -291,9 +310,9 @@ export const useAppStore = create<AppState>((set, get) => {
   return {
     game: "sts2", page: "home", dataset: emptyDataset(),
     characters: ["Ironclad", "Silent", "Regent", "Necrobinder", "Defect"],
-    filter: structuredClone(EMPTY_FILTER), revision: 0, ready: false, busy: false, error: null,
+    filter: structuredClone(EMPTY_FILTER), revision: 0, archiveRevision: 0, ready: false, busy: false, error: null,
     favorites: [], settings: { theme: "system", minimumSample: 1, autoSync: true },
-    syncSource: "", syncStatus: "未选择同步文件夹", syncError: null, lastSyncedAt: null,
+    syncSource: "", syncStatus: "未选择同步文件夹", syncError: null, lastSyncedAt: null, migrationStatus: null,
     async initialize() {
       if (initialization) return initialization;
       initialization = (async () => {
@@ -303,7 +322,7 @@ export const useAppStore = create<AppState>((set, get) => {
           for (const game of ["sts1", "sts2"] as const)
             syncStates[game].status = preferences.games[game].source
               ? preferences.games[game].autoSync ? "等待同步" : "已暂停" : "未选择同步文件夹";
-          set({ settings: { theme: preferences.theme, minimumSample: preferences.minimumSample,
+          set({ game: preferences.selectedGame ?? get().game, settings: { theme: preferences.theme, minimumSample: preferences.minimumSample,
             autoSync: preferences.games[get().game].autoSync ?? preferences.autoSync } });
           publishSync(get().game);
         } catch (error) { set({ error: message(error), ready: false }); }
@@ -311,30 +330,33 @@ export const useAppStore = create<AppState>((set, get) => {
       return initialization;
     },
     async selectGame(game) {
+      if (get().migrationStatus) return;
       await get().initialize();
+      preferences.selectedGame = game;
+      persist();
       const token = ++selection;
       set({ game, ready: false, dataset: emptyDataset(),
-        filter: { ...structuredClone(EMPTY_FILTER),
-          ...(preferences.games[game].pageFilters?.[filterScope(pages[game])] ?? preferences.games[game].filter) },
+        filter: pageFilter(pages[game], { ...structuredClone(EMPTY_FILTER),
+          ...(preferences.games[game].pageFilters?.[filterScope(pages[game])] ?? preferences.games[game].filter) }),
         favorites: preferences.games[game].favorites, page: pages[game], error: null });
       publishSync(game);
       try {
         await withEngine(game, async () => {
           if (token !== selection) return;
-          const dataset = await currentDataset(game);
-          await analysisClient(game).call({ op: "load", game, ...dataset });
-          if (token === selection) publishDataset(game, dataset);
+          const snapshot = await platform.openDataset(game);
+          await analysisClient(game).call({ op: "open", game, snapshot });
+          if (token === selection) publishDataset(game, snapshot);
         });
       } catch (error) { if (token === selection) set({ error: message(error), ready: false }); }
     },
     navigate(page) {
       const game = get().game;
       const saved = preferences.games[game];
-      saved.pageFilters = { ...saved.pageFilters, [filterScope(get().page)]: get().filter };
+      if (!get().migrationStatus) saved.pageFilters = { ...saved.pageFilters, [filterScope(get().page)]: get().filter };
       if (page !== "home") pages[game] = page;
-      const filter = { ...structuredClone(EMPTY_FILTER), ...(saved.pageFilters[filterScope(page)] ?? {}) };
+      const filter = pageFilter(page, { ...structuredClone(EMPTY_FILTER), ...(saved.pageFilters?.[filterScope(page)] ?? {}) });
       set({ page, filter });
-      persist();
+      if (!get().migrationStatus) persist();
     },
     openRun(id) {
       const context = rememberContext();
@@ -352,7 +374,8 @@ export const useAppStore = create<AppState>((set, get) => {
       if (entry) get().setFilter(entry.filter);
     },
     setFilter(patch) {
-      const filter = { ...get().filter, ...patch };
+      if (get().migrationStatus) return;
+      const filter = pageFilter(get().page, { ...get().filter, ...patch });
       const saved = preferences.games[get().game];
       saved.filter = filter;
       saved.pageFilters = { ...saved.pageFilters, [filterScope(get().page)]: filter };
@@ -361,12 +384,14 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     resetFilter() { get().setFilter(structuredClone(EMPTY_FILTER)); },
     toggleFavorite(id) {
+      if (get().migrationStatus) return;
       const favorites = get().favorites.includes(id) ? get().favorites.filter((f) => f !== id) : [...get().favorites, id];
       preferences.games[get().game].favorites = favorites;
       set({ favorites });
       persist();
     },
     setSettings(patch) {
+      if (get().migrationStatus) return;
       if (patch.autoSync !== undefined) {
         const game = get().game;
         preferences.games[game].autoSync = patch.autoSync;
@@ -425,6 +450,92 @@ export const useAppStore = create<AppState>((set, get) => {
         await commit(game, dataset, previous);
       });
     },
+    async restoreArchive(source) {
+      const game = get().game;
+      await operation(game, async () => {
+        const previous = await currentDataset(game);
+        const checkpoint = loaded[game]!;
+        const candidate = await platform.loadSourceDataset(game, source);
+        if (!candidate) throw new Error("未找到来源归档");
+        const dataset = await analysisClient(game).call<Dataset>({ op: "validateDataset", game, dataset: candidate });
+        await analysisClient(game).call({ op: "load", game, ...dataset });
+        let snapshot: DatasetSnapshot;
+        try { snapshot = await platform.activateArchive(game, source); }
+        catch (error) {
+          await analysisClient(game).call({ op: "load", game, ...previous });
+          await analysisClient(game).call({ op: "open", game, snapshot: checkpoint, keepLoaded: true });
+          throw error;
+        }
+        stopSource(game);
+        await analysisClient(game).call({ op: "open", game, snapshot, keepLoaded: true });
+        publishDataset(game, snapshot);
+      });
+    },
+    async migrateLegacy(legacy, ids, active, usePreferences) {
+      const game = get().game;
+      let completed = false;
+      await operation(game, async () => {
+        set({ migrationStatus: "正在准备迁移" });
+        try {
+          const sources = ids.map((id) => legacy.sources.find((source) => source.id === id));
+          if (sources.some((source) => !source) || new Set(ids).size !== ids.length) throw new Error("迁移来源选择无效");
+          const mappings: Partial<Record<GameVersion, Record<string, string[]>>> = {};
+          const activate = { ...active };
+          for (const [index, source] of sources.entries()) {
+            if (!source) continue;
+            set({ migrationStatus: `正在校验和暂存 ${index + 1} / ${sources.length}` });
+            const payload = await platform.readLegacySource(legacy.token, source.id);
+            const current = await platform.openDataset(source.game);
+            const previous = current.dataset.source === source.source
+              ? await currentDataset(source.game)
+              : await platform.loadSourceDataset(source.game, source.source) ?? emptyDataset();
+            const prepared = await analysisClient(source.game).call<{ serialized: string; idMap: Record<string, string> }>({
+              op: "prepareLegacyDataset", payload, previous, game: source.game,
+            });
+            await platform.stageLegacySource(legacy.token, source.id, prepared.serialized);
+            const map = mappings[source.game] ??= {};
+            for (const [oldID, newID] of Object.entries(prepared.idMap)) map[oldID] = [...new Set([...(map[oldID] ?? []), newID])];
+            if (loaded[source.game]?.dataset.source === source.source && !activate[source.game]) activate[source.game] = source.id;
+          }
+          await persistQueue.catch(() => {});
+          const next = usePreferences && legacy.preferences
+            ? await analysisClient(game).call<Preferences>({ op: "legacyPreferences", current: preferences, values: legacy.preferences, mappings })
+            : structuredClone(preferences);
+          const changedGames = (["sts1", "sts2"] as const).filter((target) => !!activate[target]);
+          for (const target of changedGames) {
+            const source = legacy.sources.find((source) => source.id === activate[target]);
+            if (!source || source.game !== target || !ids.includes(source.id)) throw new Error("迁移后的来源选择无效");
+            if (loaded[target]?.dataset.source !== source.source) {
+              next.games[target].source = "";
+              next.games[target].autoSync = false;
+            }
+          }
+          set({ migrationStatus: "正在提交全部来源与偏好" });
+          await platform.commitLegacyMigration(legacy.token, ids, activate, next);
+          preferences = cleanPreferences(next);
+          set((state) => ({ archiveRevision: state.archiveRevision + 1 }));
+          completed = true;
+          for (const target of ["sts1", "sts2"] as const) {
+            generations[target] += 1;
+            syncStates[target] = { verifiedAt: 0, error: null, status: preferences.games[target].source
+              ? preferences.games[target].autoSync ? "等待同步" : "已暂停" : "未选择同步文件夹", pending: false };
+          }
+          const saved = preferences.games[get().game];
+          set({ favorites: saved.favorites, settings: { theme: preferences.theme, minimumSample: preferences.minimumSample,
+            autoSync: saved.autoSync ?? preferences.autoSync }, filter: pageFilter(get().page,
+            { ...structuredClone(EMPTY_FILTER), ...(saved.pageFilters?.[filterScope(get().page)] ?? get().filter) }),
+            ready: changedGames.includes(get().game) ? false : get().ready });
+          publishSync(get().game);
+          for (const target of changedGames) {
+            delete loaded[target];
+            const snapshot = await platform.openDataset(target);
+            await analysisClient(target).call({ op: "open", game: target, snapshot });
+            publishDataset(target, snapshot);
+          }
+        } finally { set({ migrationStatus: null }); }
+      });
+      return completed;
+    },
     async clearData() {
       const game = get().game;
       stopSource(game);
@@ -435,8 +546,11 @@ export const useAppStore = create<AppState>((set, get) => {
         const dataset = emptyDataset();
         // Publish an empty checkpoint first, matching the native clear operation.
         // A later archive-cleanup error cannot leave the UI displaying deleted runs.
-        await commit(game, dataset, loaded[game] ?? emptyDataset());
+        await commit(game, dataset, await currentDataset(game));
         await platform.clearDataset(game);
+        const snapshot = await platform.openDataset(game);
+        await analysisClient(game).call({ op: "open", game, snapshot });
+        publishDataset(game, snapshot);
         preferences.games[game] = { source: "", favorites: [], autoSync: false };
         backStacks[game] = [];
         pages[game] = "dashboard";

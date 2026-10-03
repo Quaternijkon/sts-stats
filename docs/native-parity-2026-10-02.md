@@ -1,5 +1,16 @@
 # 原生功能对照与补齐 · 2026-10-02
 
+2026-10-03 追加迁移收尾，以下能力已写入代码与合成回归用例，等待本次提交的 GitHub Actions 验证。此前提交的通过状态不代表本轮通过。
+
+| 追加范围 | 实现 | 回归覆盖 |
+| --- | --- | --- |
+| 轻量启动与跨重启缓存 | 原生摘要、Worker 延迟加载、分析／卡池磁盘缓存、身份和容量限制 | persistent-cache.test、worker.test、Rust 缓存测试 |
+| 完整旧目录迁移 | 两游戏、全部来源和历史版本、旧 plist 偏好、收藏 ID 映射、无原目录归档切换 | legacy-migration.test、store-import.test、Rust plist／归档测试、run-parity.spec |
+| 迁移失败与恢复 | 全部所选来源统一提交、回滚日志、进程中断恢复、实例文件锁、重试仅提交本次选择 | Rust 事务／恢复测试、store-import.test |
+| 偏好与版本兼容 | 四组旧筛选映射、缺失偏好保留、新旧快照合并、仅生涯归档日期、迁移时暂停偏好写入 | legacy-migration.test、store-import.test |
+| 对局基准完整入口 | CSV、有效／排除观测、可靠度、95% 区间、最低样本量、角色详情 | run-parity.spec |
+| 同步与处理容量 | 原生每 2 秒轮询、启动立即同步、移除权威存档的固定容量限制 | 既有同步用例、Rust 大型合成存档用例 |
+
 对照源为相邻 `sts2stats` 工程中的 Swift 视图、AppStore、AnalysisEngine、SaveSyncMonitor、模型与上游 Engine；修改仅位于 Tauri 工程。八个 subagent 分别承担概览、对象、记录、存储、引擎、共用界面、云端流程和独立集成审查。
 
 以下为代码实现与静态审查清单，源码已按用户授权推送到 `codex/native-feature-parity` 分支进行检查和编译。清单本身不代表 TypeScript、Rust、浏览器或安装包验证通过，实际结果以 [Actions](https://github.com/Quaternijkon/sts-stats/actions) 为准。

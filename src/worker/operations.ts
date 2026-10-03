@@ -1,4 +1,4 @@
-import type { Dataset } from "../services/models";
+import type { Dataset, DatasetSummary, SummaryRun } from "../services/models";
 
 export interface StorageSummary {
   soloRuns: number;
@@ -11,13 +11,13 @@ export interface StorageSummary {
   progressRecordedRuns: number | null;
 }
 
-export function storageSummary(dataset: Dataset): StorageSummary {
+export function storageSummary(dataset: Dataset | DatasetSummary): StorageSummary {
   const solo = dataset.runs.filter(
     (run) => !run.isMultiplayer && run.playerCount <= 1 && run.players.length <= 1,
   );
   const soloIds = new Set(solo.map((run) => run.id));
   const coop = dataset.runs.filter((run) => !soloIds.has(run.id));
-  const duration = (runs: Dataset["runs"]) =>
+  const duration = (runs: SummaryRun[]) =>
     runs.reduce(
       (sum, run) => sum + (Number.isFinite(run.runTime) ? run.runTime : 0),
       0,

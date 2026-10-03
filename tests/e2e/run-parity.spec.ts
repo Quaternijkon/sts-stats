@@ -147,3 +147,48 @@ test("cooperative player switching keeps zero HP evidence and disables solo obje
   expect(record.timeline[0].hp).toBe(0);
   expect(record.timeline[0].recordedFields).toContain("hp");
 });
+
+test("baseline exports observations and respects the minimum sample setting", async ({ page }) => {
+  const nav = page.getByRole("navigation", { name: "页面" });
+  await nav.getByRole("button", { name: "单人记录", exact: true }).click();
+  await ready(page);
+  await page.locator(".run-table tbody tr").first().getByRole("button").nth(1).click();
+  await ready(page);
+  const baseline = page.locator(".card").filter({ has: page.getByRole("heading", { name: "同角色、同进阶基准", exact: true }) });
+  await expect(baseline.locator("tbody tr")).toHaveCount(1);
+  await baseline.getByText("样本与统计口径", { exact: true }).click();
+  await expect(baseline).toContainText("有效观测");
+  await expect(baseline).toContainText("可靠度");
+  const download = page.waitForEvent("download");
+  await baseline.getByRole("button", { name: "导出 CSV", exact: true }).click();
+  const exported = await download;
+  expect(exported.suggestedFilename()).toBe("sts2-run-baseline.csv");
+  const csv = await readFile((await exported.path())!, "utf8");
+  expect(csv).toContain("win_rate");
+  expect(csv).toContain("avg_duration");
+  await nav.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByLabel("最低样本量", { exact: true }).fill("1000");
+  await nav.getByRole("button", { name: "单人记录", exact: true }).click();
+  await ready(page);
+  await page.locator(".run-table tbody tr").first().getByRole("button").nth(1).click();
+  await ready(page);
+  await expect(baseline).toContainText("样本低于最低样本量");
+  await expect(baseline.locator("tbody tr")).toHaveCount(0);
+  await baseline.getByText("样本与统计口径", { exact: true }).click();
+  await baseline.getByRole("button", { name: "显示全部样本", exact: true }).click();
+  await expect(baseline.locator("tbody tr")).toHaveCount(1);
+});
+
+test("source archives can be opened without a live game directory", async ({ page }) => {
+  await page.evaluate((data) => {
+    localStorage.setItem("sts2stats.archive.sts2./synthetic/retained", JSON.stringify({ ...data, source: "/synthetic/retained", runs: data.runs.slice(0, 1) }));
+  }, dataset);
+  await page.getByRole("navigation", { name: "页面" }).getByRole("button", { name: "存档管理", exact: true }).click();
+  await ready(page);
+  const archives = page.locator(".card").filter({ has: page.getByRole("heading", { name: "来源归档", exact: true }) });
+  await expect(archives).toContainText("/synthetic/retained");
+  await archives.getByRole("button", { name: "使用此归档", exact: true }).click();
+  await expect(page.locator(".metric-tile").filter({ hasText: "单人记录" }).locator("strong")).toHaveText("1");
+  await expect(archives.getByRole("button", { name: "当前来源", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("自动同步", { exact: true })).not.toBeChecked();
+});

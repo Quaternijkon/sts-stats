@@ -74,6 +74,21 @@ describe("worker scheduling and recovery", () => {
     const client = new AnalysisClient(() => { throw new Error("worker unavailable"); });
     await expect(client.call({ op: "dashboard" })).rejects.toThrow("worker unavailable");
   });
+  it("recovers from a lightweight checkpoint without retaining full saves in the client", async () => {
+    const workers: SyntheticWorker[] = [];
+    const client = new AnalysisClient(() => {
+      const worker = new SyntheticWorker(); workers.push(worker); return worker as unknown as Worker;
+    });
+    const opened = client.call({ op: "open", game: "sts2", snapshot: { identity: "synthetic", dataset: { source: "", importedAt: 0, runs: [], progress: null } } });
+    workers[0].ready(); workers[0].respond(null); await opened;
+    const pending = client.call({ op: "dashboard" });
+    const rejected = expect(pending).rejects.toThrow("synthetic crash");
+    workers[0].onerror?.({ message: "synthetic crash" }); await rejected;
+    const recovery = client.call({ op: "dashboard" }); workers[1].ready();
+    expect(workers[1].messages[0].request.op).toBe("open");
+    expect(workers[1].messages[0].request).not.toHaveProperty("runs");
+    workers[1].respond(null); workers[1].respond({ summary: {} }); await recovery;
+  });
 });
 
 describe("local storage statistics", () => {

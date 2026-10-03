@@ -164,9 +164,10 @@ export function App() {
   }, [state.settings.theme]);
   useEffect(() => {
     if (!isTauri()) return;
+    void useAppStore.getState().syncAll(true);
     const timer = setInterval(() => {
       void useAppStore.getState().syncAll(false);
-    }, 15000);
+    }, 2000);
     const foreground = () => {
       if (document.visibilityState !== "hidden") void useAppStore.getState().syncAll(true);
     };
@@ -360,7 +361,7 @@ export function App() {
             !state.page.startsWith("run/") && <AppFilters />}
           {state.busy && (
             <div className="sync-status" role="status">
-              正在同步…
+              {state.migrationStatus ?? "正在同步…"}
             </div>
           )}
           <PageBoundary page={`${state.game}/${state.revision}/${state.page}`}>
