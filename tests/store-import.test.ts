@@ -87,7 +87,7 @@ describe("source and worker transactions", () => {
     await useAppStore.getState().selectGame("sts1");
     selected.resolve({ directory: "/synthetic", files: [file()] });
     await pending;
-    expect(mocks.platform.saveDataset).toHaveBeenCalledWith("sts2", expect.objectContaining({ source: "/synthetic" }), [file()], expect.any(String));
+    expect(mocks.platform.saveDataset).toHaveBeenCalledWith("sts2", expect.objectContaining({ source: "/synthetic" }), [file()], expect.any(String), expect.any(String));
     expect(useAppStore.getState().game).toBe("sts1");
     expect(useAppStore.getState().dataset.runs).toHaveLength(0);
     await useAppStore.getState().selectGame("sts2");

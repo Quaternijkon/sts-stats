@@ -5,7 +5,7 @@ const cwd = fileURLToPath(new URL("..", import.meta.url));
 const pnpm = process.env.npm_execpath;
 if (!pnpm) throw Error("请使用 pnpm verify");
 const steps = [
-  ...["check:version", "lint", "typecheck", "test", "verify:local", "build", "test:e2e"]
+  ...["check:version", "lint", "typecheck", "test", "verify:local", "build", "build:web", "test:e2e", "test:e2e:web"]
     .map((step) => [process.execPath, [pnpm, step]]),
   ["cargo", ["fmt", "--manifest-path", "src-tauri/Cargo.toml", "--", "--check"]],
   ["cargo", ["clippy", "--locked", "--manifest-path", "src-tauri/Cargo.toml", "--all-targets", "--", "-D", "warnings"]],

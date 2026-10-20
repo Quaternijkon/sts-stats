@@ -53,7 +53,13 @@ function message(error: unknown): string {
 }
 function persist() {
   const snapshot = structuredClone(preferences);
-  persistQueue = persistQueue.catch(() => {}).then(() => platform.savePreferences(snapshot));
+  let checkpoint: string | undefined;
+  let journalError: string | null = null;
+  try { checkpoint = platform.stagePreferences?.(snapshot); }
+  catch { journalError = "偏好尚在保存，请等待完成后再刷新页面"; useAppStore.setState({ error: journalError }); }
+  persistQueue = persistQueue.catch(() => {}).then(() => platform.savePreferences(snapshot, checkpoint)).then(() => {
+    if (journalError && useAppStore.getState().error === journalError) useAppStore.setState({ error: null });
+  });
   persistQueue.catch((error) => useAppStore.setState({ error: message(error) }));
 }
 /** Loads and mutations share a queue per worker, including game switches. */
@@ -111,6 +117,7 @@ interface AppState {
   lastSyncedAt: number | null;
   migrationStatus: string | null;
   initialize(): Promise<void>;
+  refreshPreferences(): Promise<void>;
   selectGame(game: GameVersion): Promise<void>;
   navigate(page: string): void;
   openRun(id: string): void;
@@ -202,7 +209,7 @@ export const useAppStore = create<AppState>((set, get) => {
     let snapshot: DatasetSnapshot;
     try {
       const text = serialized ?? await analysisClient(game).call<string>({ op: "serializeDataset", dataset });
-      snapshot = await platform.saveDataset(game, dataset, files, text);
+      snapshot = await platform.saveDataset(game, dataset, files, text, checkpoint.identity);
     } catch (error) {
       await analysisClient(game).call({ op: "load", game, ...previous });
       await analysisClient(game).call({ op: "open", game, snapshot: checkpoint, keepLoaded: true });
@@ -274,7 +281,7 @@ export const useAppStore = create<AppState>((set, get) => {
     checkingSync.add(game);
     const state = syncStates[game];
     try {
-      const before = await platform.snapshotDirectory(source);
+      const before = await platform.snapshotDirectory(source, game);
       if (generation !== generations[game]) return;
       const stable = state.candidate === before;
       state.candidate = before;
@@ -287,10 +294,10 @@ export const useAppStore = create<AppState>((set, get) => {
         if (generation !== generations[game]) return;
         state.status = "正在同步";
         publishSync(game);
-        const resolved = await platform.resolveDirectory(source);
-        const files = await platform.scanDirectory(source);
-        const after = await platform.snapshotDirectory(source);
-        if (before !== after || resolved !== await platform.resolveDirectory(source))
+        const resolved = await platform.resolveDirectory(source, game);
+        const files = await platform.scanDirectory(source, game);
+        const after = await platform.snapshotDirectory(source, game);
+        if (before !== after || resolved !== await platform.resolveDirectory(source, game))
           throw new Error("存档正在写入，请稍后重试");
         if (generation !== generations[game] || (!immediately && !preferences.games[game].autoSync)) return;
         if (await importForGame(game, files, resolved, generation,
@@ -328,6 +335,25 @@ export const useAppStore = create<AppState>((set, get) => {
         } catch (error) { set({ error: message(error), ready: false }); }
       })();
       return initialization;
+    },
+    async refreshPreferences() {
+      if (get().migrationStatus) return;
+      const value = await platform.loadPreferences();
+      if (!value) return;
+      const next = cleanPreferences(value);
+      for (const game of ["sts1", "sts2"] as const) {
+        const old = preferences.games[game], current = next.games[game];
+        if (old.source !== current.source || old.autoSync !== current.autoSync) {
+          generations[game] += 1;
+          syncStates[game] = { verifiedAt: 0, error: null, pending: false, status: current.source
+            ? current.autoSync ? "等待同步" : "已暂停" : "未选择同步文件夹" };
+        }
+      }
+      preferences = next;
+      const current = preferences.games[get().game];
+      set({ favorites: current.favorites, settings: { theme: next.theme, minimumSample: next.minimumSample, autoSync: current.autoSync ?? next.autoSync },
+        filter: pageFilter(get().page, { ...structuredClone(EMPTY_FILTER), ...(current.pageFilters?.[filterScope(get().page)] ?? get().filter) }) });
+      publishSync(get().game);
     },
     async selectGame(game) {
       if (get().migrationStatus) return;
@@ -460,7 +486,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const dataset = await analysisClient(game).call<Dataset>({ op: "validateDataset", game, dataset: candidate });
         await analysisClient(game).call({ op: "load", game, ...dataset });
         let snapshot: DatasetSnapshot;
-        try { snapshot = await platform.activateArchive(game, source); }
+        try { snapshot = await platform.activateArchive(game, source, checkpoint.identity); }
         catch (error) {
           await analysisClient(game).call({ op: "load", game, ...previous });
           await analysisClient(game).call({ op: "open", game, snapshot: checkpoint, keepLoaded: true });

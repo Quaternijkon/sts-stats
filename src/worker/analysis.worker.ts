@@ -30,7 +30,9 @@ self.onmessage = ({ data }) => {
       } else if (request.op === "prepareLegacyDataset") {
         result = await prepareLegacyDataset(request.payload as LegacySourceData, request.previous as Dataset, request.game as GameVersion);
         bytes = (result as { serialized: string }).serialized.length * 2;
-      } else if (request.op === "validateDataset") result = validateDataset(request.dataset, request.game as GameVersion);
+      } else if (request.op === "parseJson") result = JSON.parse(request.text as string);
+      else if (request.op === "parseDataset") result = validateDataset(JSON.parse(request.text as string), request.game as GameVersion);
+      else if (request.op === "validateDataset") result = validateDataset(request.dataset, request.game as GameVersion);
       else if (request.op === "legacyPreferences") result = legacyPreferences(request.current as Preferences, request.values as Record<string, unknown>, request.mappings as Parameters<typeof legacyPreferences>[2]);
       else if (request.op === "serializeDataset") result = JSON.stringify(request.dataset);
       else if (request.op === "serializeJson") {

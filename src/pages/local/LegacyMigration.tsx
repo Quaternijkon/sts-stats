@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, ErrorState, EmptyState } from "../../components/UI";
 import { useAppStore } from "../../state/appStore";
-import { platform } from "../../services/platform";
+import { platform, sourceLabel } from "../../services/platform";
 import type { ArchiveSummary, GameVersion, LegacySelection } from "../../services/models";
 import { Pager } from "../objects/ObjectTables";
 
@@ -102,7 +102,7 @@ export function SourceArchives() {
     {error && <button onClick={() => setRetry((value) => value + 1)}>重新读取归档</button>}
     {!sources.length ? <EmptyState>没有来源归档</EmptyState> : <>
       <div className="table-scroll"><table><thead><tr><th>来源</th><th>对局</th><th>操作</th></tr></thead><tbody>
-        {sources.slice(offset, offset + 100).map((source) => <tr key={source.source}><td title={source.source}>{source.source || "未指定来源"}</td><td>{source.runs}</td><td>
+        {sources.slice(offset, offset + 100).map((source) => <tr key={source.source}><td title={sourceLabel(source.source)}>{sourceLabel(source.source) || "未指定来源"}</td><td>{source.runs}</td><td>
           <button disabled={busy || dataset.source === source.source} onClick={() => void restoreArchive(source.source)}>{dataset.source === source.source ? "当前来源" : "使用此归档"}</button>
         </td></tr>)}
       </tbody></table></div>

@@ -3,7 +3,7 @@ import { Download, FolderOpen, RefreshCw } from "lucide-react";
 import { useAppStore } from "../state/appStore";
 import { useAnalysis } from "../state/useAnalysis";
 import { analysisClient } from "../worker/client";
-import { platform } from "../services/platform";
+import { platform, platformCapabilities, sourceLabel } from "../services/platform";
 import { Card, ErrorState, MetricGrid, MetricTile } from "../components/UI";
 import { formatValue } from "../styles/theme";
 import { zhCharacter } from "../../Engine/domain/i18n";
@@ -17,35 +17,60 @@ function progressCount(row: Record<string, unknown>, key: "wins" | "losses") {
 }
 
 function DataDirectory() {
+  const [storage, setStorage] = useState<Awaited<ReturnType<typeof platform.storageInfo>> | null>(null);
   const [directory, setDirectory] = useState("");
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     platform.dataDirectory().then((value) => { if (active) setDirectory(value); })
       .catch((reason) => { if (active) setError(String(reason)); });
+    if (!platformCapabilities.desktop) platform.storageInfo().then((value) => { if (active) setStorage(value); })
+      .catch((reason) => { if (active) setError(String(reason)); });
     return () => { active = false; };
   }, []);
   return <>
     <dl className="details"><dt>数据目录</dt><dd>{directory || "—"}</dd></dl>
     <ErrorState error={error} />
-    <button onClick={() => void platform.openDataDirectory().catch((reason) => setError(String(reason)))}><FolderOpen size={16} />打开数据文件夹</button>
+    {platformCapabilities.desktop ? <button onClick={() => void platform.openDataDirectory().catch((reason) => setError(String(reason)))}><FolderOpen size={16} />打开数据文件夹</button> : <>
+      <dl className="details"><dt>已使用</dt><dd>{storage?.usage == null ? "—" : `${(storage.usage / 1024 / 1024).toFixed(1)} MB`}</dd>
+        <dt>可用配额</dt><dd>{storage?.quota == null ? "—" : `${(storage.quota / 1024 / 1024).toFixed(1)} MB`}</dd>
+        <dt>数据保留</dt><dd title="数据保存在当前浏览器和站点。清理站点数据或关闭隐私窗口可能移除数据，请定期导出备份。">{storage?.persistent ? "已保留" : "由浏览器管理"}</dd></dl>
+      {platformCapabilities.persistentStorage && <button disabled={storage?.persistent === true} onClick={async () => {
+        setError(null);
+        try {
+          const kept = await platform.requestPersistence();
+          setStorage(await platform.storageInfo());
+          if (!kept) setError("浏览器未批准长期保留，请定期导出数据备份");
+        } catch (reason) { setError(String(reason)); }
+      }}>保留浏览器数据</button>}
+    </>}
   </>;
 }
 
 export function SaveSyncControls() {
+  const [accessError, setAccessError] = useState<string | null>(null);
   const { settings, setSettings, busy, sync, syncSource, syncStatus, syncError, lastSyncedAt, migrationStatus } = useAppStore();
   return <div className="sync-state">
     <label title={syncSource ? "应用运行时单向归档来源目录，来源删除不会移除已导入历史" : "先选择存档文件夹以启用自动同步"}>
-      自动同步<input type="checkbox" checked={settings.autoSync} disabled={!syncSource || !!migrationStatus}
+      自动同步<input type="checkbox" checked={settings.autoSync} disabled={!syncSource || !platformCapabilities.directorySync || !!migrationStatus}
         onChange={(event) => setSettings({ autoSync: event.target.checked })} />
     </label>
     <dl className="details">
       <dt>同步状态</dt><dd role="status">{syncStatus}</dd>
-      <dt>同步目录</dt><dd>{syncSource || "—"}</dd>
+      <dt>同步目录</dt><dd>{sourceLabel(syncSource) || "—"}</dd>
+      {!platformCapabilities.desktop && <><dt>导入方式</dt><dd>{platformCapabilities.directorySync ? "目录授权 / 手动导入" : "手动导入"}</dd></>}
       <dt>最近同步</dt><dd>{lastSyncedAt == null ? "—" : new Date(lastSyncedAt).toLocaleString()}</dd>
     </dl>
     <ErrorState error={syncError} />
-    <button disabled={busy || !syncSource} onClick={() => void sync()}><RefreshCw size={16} />立即同步</button>
+    <ErrorState error={accessError} />
+    {!platformCapabilities.desktop && platformCapabilities.directorySync && syncSource && <button disabled={busy} onClick={async () => {
+      setAccessError(null);
+      try {
+        if (await platform.requestSourceAccess(syncSource)) await sync();
+        else setAccessError("未获得读取权限，请重新选择存档文件夹");
+      } catch (reason) { setAccessError(String(reason)); }
+    }}>重新授权目录</button>}
+    <button disabled={busy || !syncSource || !platformCapabilities.directorySync} onClick={() => void sync()}><RefreshCw size={16} />立即同步</button>
   </div>;
 }
 
@@ -94,7 +119,7 @@ export function LocalDataPage() {
       </div>
       <ErrorState error={exportError} />
       <dl className="details">
-        <dt>来源</dt><dd>{dataset.source || "未导入"}</dd>
+        <dt>来源</dt><dd>{sourceLabel(dataset.source) || "未导入"}</dd>
         <dt>最近导入</dt><dd>{data && (data.totalRuns > 0 || dataset.progress) ? new Date((dataset.importedAt + 978307200) * 1000).toLocaleString() : "—"}</dd>
         <dt>收藏</dt><dd>{favorites.length}</dd>
         {game === "sts2" && <><dt>多人时长</dt><dd>{formatValue(data?.coopTime, "duration")}</dd>
@@ -103,7 +128,7 @@ export function LocalDataPage() {
             ? dataset.progress.characterStats.map((row) => `${zhCharacter(row.character)} ${progressCount(row, "wins")} / ${progressCount(row, "losses")}`).join(" · ") : "—"}</dd></>}
       </dl>
     </Card>
-    <LegacyMigration />
+    {platformCapabilities.legacyMigration && <LegacyMigration />}
     <SourceArchives />
     <Card title="自动同步"><SaveSyncControls /></Card>
     <Card title="应用数据"><DataDirectory /><div className="action-row"><button onClick={() => navigate("settings")}>设置</button></div></Card>

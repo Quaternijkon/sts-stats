@@ -98,9 +98,9 @@ export interface StatsPlatform {
   takeDroppedSources(): Promise<ImportSelection | null>;
   chooseDirectory(): Promise<ImportSelection | null>;
   chooseFiles(): Promise<SaveFile[]>;
-  resolveDirectory(directory: string): Promise<string>;
-  scanDirectory(directory: string): Promise<SaveFile[]>;
-  snapshotDirectory(directory: string): Promise<string>;
+  resolveDirectory(directory: string, game?: GameVersion): Promise<string>;
+  scanDirectory(directory: string, game?: GameVersion): Promise<SaveFile[]>;
+  snapshotDirectory(directory: string, game?: GameVersion): Promise<string>;
   loadSourceDataset(game: GameVersion, source: string): Promise<Dataset | null>;
   loadDataset(game: GameVersion): Promise<Dataset | null>;
   openDataset(game: GameVersion): Promise<DatasetSnapshot>;
@@ -112,10 +112,14 @@ export interface StatsPlatform {
     dataset: Dataset,
     files?: SaveFile[],
     serialized?: string,
+    expectedIdentity?: string,
   ): Promise<DatasetSnapshot>;
   importDataset(): Promise<Dataset | null>;
   listArchives(game: GameVersion): Promise<ArchiveSummary[]>;
-  activateArchive(game: GameVersion, source: string): Promise<DatasetSnapshot>;
+  activateArchive(game: GameVersion, source: string, expectedIdentity?: string): Promise<DatasetSnapshot>;
+  requestSourceAccess(directory: string): Promise<boolean>;
+  storageInfo(): Promise<{ usage: number | null; quota: number | null; persistent: boolean | null }>;
+  requestPersistence(): Promise<boolean>;
   chooseLegacyData(includePreferences: boolean): Promise<LegacySelection | null>;
   readLegacySource(token: string, id: string): Promise<LegacySourceData>;
   stageLegacySource(token: string, id: string, text: string): Promise<void>;
@@ -124,7 +128,8 @@ export interface StatsPlatform {
   exportText(name: string, text: string): Promise<boolean>;
   exportBinary(name: string, data: number[]): Promise<boolean>;
   loadPreferences(): Promise<Preferences | null>;
-  savePreferences(preferences: Preferences): Promise<void>;
+  stagePreferences?(preferences: Preferences): string;
+  savePreferences(preferences: Preferences, checkpoint?: string): Promise<void>;
   dataDirectory(): Promise<string>;
   openDataDirectory(): Promise<void>;
   clearDataset(game: GameVersion): Promise<void>;

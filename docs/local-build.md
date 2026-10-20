@@ -1,6 +1,6 @@
 # 本地验证、构建与 Release
 
-开发、依赖安装、检查、测试、编译和打包均在本地完成，不使用 GitHub Actions。仓库不包含 Actions 工作流；GitHub 只保存源码与已在本地生成的 Release 附件。
+开发、依赖安装、检查、测试、编译和打包均在本地完成，不使用 GitHub Actions。仓库不包含 Actions 工作流；GitHub 只保存源码与已在本地生成的 Release 附件。支持 Windows、macOS 和 Web。
 
 ## 准备与检查
 
@@ -48,6 +48,8 @@ pnpm build:desktop windows
 交叉编译成功与安装包结构检查不能替代 Windows 实机的安装、权限、系统对话框和 WebView2 验证。Release 必须明确列出已执行检查和未执行的目标系统验证。
 
 ## 上传 Release
+
+Web 使用 `pnpm build:web` 生成 `dist-web/` 和静态资源 ZIP，使用 `pnpm test:e2e:web` 验证实际生产包。部署步骤与浏览器能力见 [web.md](web.md)。三个平台从同一提交生成，再上传到匹配版本的 Release。
 
 先提交已验证代码，从同一提交构建两个平台的安装包，核对 `package.json`、`Cargo.toml`、`tauri.conf.json`、Cargo.lock 和标签版本一致。检查安装包后生成 SHA-256 校验和，推送源码和匹配的 `v版本` 标签，再使用 `gh release create` / `gh release upload` 上传实际生成的 DMG、EXE、可用的 MSI、校验和及构建说明。不创建 Actions 运行。
 

@@ -4,7 +4,7 @@
 
 - `Engine/` 是原项目上游 TypeScript 解析、Schema、统计和官方本地化。不得直接修改原生项目生成的 engine.js；本工程直接编译上游。
 - `src/` 是 React / TypeScript 前端。状态在 Zustand，文件接口只能经过 `src/services/platform.ts`，重型分析与数据处理在独立 Worker。
-- `src-tauri/` 是 Tauri 2 Rust 原生层；原生读写和扫描放在 spawn_blocking。平台仅 Windows / macOS。
+- `src-tauri/` 是 Tauri 2 Rust 原生层；原生读写和扫描放在 spawn_blocking。支持 Windows / macOS / Web；Web 共用界面、Engine 和 Worker，平台差异通过 platform.ts 及其内部适配器处理。
 - `docs/`、`scripts/`、`tests/` 分别放架构与构建说明、本地构建／发布／审计脚本及合成测试。不添加 GitHub Actions 工作流。
 - TypeScript 两空格；Rust cargo fmt。修改保持现有风格，不做无关重排。
 
@@ -12,7 +12,9 @@
 
 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm verify:local`、`pnpm check:version`、`pnpm build`、`pnpm test:e2e`；Rust fmt / clippy / test 使用 src-tauri/Cargo.toml 和 Cargo.lock。
 
-以上检查在本地执行；前端使用 Chromium / WebKit 和合成数据，Rust 使用本地受支持平台工具链。必须在本地完成 macOS 与 Windows 的发行构建；macOS 生成 Apple Silicon / Intel 通用 DMG，Windows 生成 x64 NSIS EXE，在具备 WiX 环境时同时生成 MSI。允许使用本地交叉工具链；交叉编译、安装包结构检查和目标系统安装运行验证须分别如实记录，不能互相冒充。
+以上检查在本地执行；前端使用 Chromium / WebKit 和合成数据，Rust 使用本地受支持平台工具链。必须在本地完成 macOS、Windows 与 Web 的发行构建；macOS 生成 Apple Silicon / Intel 通用 DMG，Windows 生成 x64 NSIS EXE，在具备 WiX 环境时同时生成 MSI，Web 生成可部署到站点子目录的静态资源 ZIP。验证实际 Web 生产包、刷新持久化、大数据导入、浏览器权限及无原生 API 的降级行为。允许使用本地交叉工具链；交叉编译、安装包结构检查和目标系统安装运行验证须分别如实记录，不能互相冒充。
+
+Web 数据和偏好存储在当前站点的 IndexedDB，不依赖分析服务器；用户明确选择的原文件只读。目录访问仅申请 read 权限，不支持目录授权的浏览器使用手动导入。派生缓存受数量和字节限制，缓存失败不得破坏权威数据。桌面专属入口按能力隐藏，不能向浏览器调用 Tauri IPC。不同标签页对数据集的过期写入必须拒绝。
 
 先修复本地检查失败，再从同一提交构建、验证并发布。三个版本字段、Cargo.lock 和 v* 标签须一致。源码推送到既有 origin；安装包、校验和及不含个人数据的构建说明上传 GitHub Release，不提交安装包、依赖、缓存、测试报告或调试符号到 Git。不要创建 Actions 运行、转用云端 runner 或将未生成的产物写成已完成。
 

@@ -1,6 +1,6 @@
 [package]
 name = "sts2stats"
-version = "1.1.0"
+version = "1.2.0"
 description = "Local Slay the Spire save analytics"
 edition = "2021"
 rust-version = "1.89"

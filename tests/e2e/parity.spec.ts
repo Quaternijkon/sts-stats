@@ -70,7 +70,8 @@ test("category hubs, navigation shortcuts and game-specific sync settings", asyn
   await expect(page.locator(".toolbar h1")).toHaveText("单人记录");
   await navigation.getByRole("button", { name: "存档管理", exact: true }).click();
   await expect(page.locator(".metric-tile").filter({ hasText: "单人记录" }).locator("strong")).toHaveText("12");
-  await expect(page.getByRole("button", { name: "打开数据文件夹", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "打开数据文件夹", exact: true })).toHaveCount(0);
+  await expect(page.getByText("当前站点的浏览器存储", { exact: true })).toBeVisible();
   await expect(page.getByLabel("自动同步", { exact: true })).not.toBeChecked();
   await page.keyboard.press("Control+,");
   await expect(page.locator(".toolbar h1")).toHaveText("设置");

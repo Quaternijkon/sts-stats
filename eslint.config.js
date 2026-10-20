@@ -6,6 +6,8 @@ export default tseslint.config(
     ignores: [
       "node_modules/**",
       "dist/**",
+      "dist-web/**",
+      ".local-build/**",
       "src-tauri/target/**",
       "Engine/**",
       "test-results/**",

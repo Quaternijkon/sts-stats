@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, type ReactNode } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { isTauri } from "@tauri-apps/api/core";
+import { isDesktop, platformCapabilities, stageBrowserDrop, PREFERENCE_JOURNAL } from "./services/platform";
 import {
   Home,
   FolderOpen,
@@ -133,7 +133,7 @@ export function App() {
     return () => window.removeEventListener("sts2stats:error", handle);
   }, []);
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isDesktop) return;
     let canceled = false;
     let stop: (() => void) | undefined;
     getCurrentWebview()
@@ -163,7 +163,7 @@ export function App() {
     document.documentElement.dataset.theme = state.settings.theme;
   }, [state.settings.theme]);
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!platformCapabilities.directorySync) return;
     void useAppStore.getState().syncAll(true);
     const timer = setInterval(() => {
       void useAppStore.getState().syncAll(false);
@@ -180,6 +180,36 @@ export function App() {
     };
   }, []);
   useEffect(() => {
+    if (isDesktop) return;
+    const pending = new Set<string>();
+    const flush = () => {
+      const state = useAppStore.getState();
+      if (!state.busy && state.ready && pending.delete(state.game)) void state.selectGame(state.game);
+    };
+    const changed = (event: Event) => { pending.add(String((event as CustomEvent).detail)); flush(); };
+    const preferencesChanged = (event: StorageEvent) => {
+      if (event.key !== PREFERENCE_JOURNAL) return;
+      void useAppStore.getState().refreshPreferences().catch((error) => useAppStore.setState({ error: String(error) }));
+    };
+    const drag = (event: DragEvent) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); };
+    const drop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      if (useAppStore.getState().busy) return;
+      stageBrowserDrop(event.dataTransfer);
+      void useAppStore.getState().importDropped();
+    };
+    const unsubscribe = useAppStore.subscribe(flush);
+    window.addEventListener("sts2stats:dataset-changed", changed);
+    window.addEventListener("storage", preferencesChanged);
+    window.addEventListener("dragover", drag); window.addEventListener("drop", drop);
+    return () => {
+      unsubscribe(); window.removeEventListener("sts2stats:dataset-changed", changed);
+      window.removeEventListener("storage", preferencesChanged);
+      window.removeEventListener("dragover", drag); window.removeEventListener("drop", drop);
+    };
+  }, []);
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const s = useAppStore.getState();
@@ -190,6 +220,7 @@ export function App() {
         void (e.shiftKey ? s.importSingleFiles() : s.importDirectory());
       }
       if (e.key.toLowerCase() === "r") {
+        if (!isDesktop) return;
         e.preventDefault();
         void s.sync();
       }
@@ -227,7 +258,7 @@ export function App() {
               key={game}
               onClick={() => void state.selectGame(game)}
             >
-              <img src={`/game/${game}.png`} alt="" />
+              <img src={`${import.meta.env.BASE_URL}game/${game}.png`} alt="" />
               <strong>{game === "sts1" ? "杀戮尖塔 1" : "杀戮尖塔 2"}</strong>
             </button>
           ))}
@@ -341,7 +372,7 @@ export function App() {
               <FolderOpen size={17} />
             </button>
             <button
-              disabled={state.busy || !state.syncSource}
+              disabled={state.busy || !state.syncSource || !platformCapabilities.directorySync}
               onClick={() => void state.sync()}
               title="立即同步 ⌘/Ctrl+R"
               aria-label="立即同步"

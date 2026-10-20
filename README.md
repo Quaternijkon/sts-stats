@@ -1,6 +1,6 @@
-# 尖塔数据终端 · Windows / macOS
+# 尖塔数据终端 · Windows / macOS / Web
 
-从原生 STS2Stats 1.1.0 移植的本地存档分析应用。采用 **Tauri 2 + Rust + React / TypeScript**，保留原项目的 TypeScript 解析和统计引擎。支持《杀戮尖塔》及《杀戮尖塔 2》，两个游戏的数据、筛选、收藏、来源和分析 Worker 独立。
+从原生 STS2Stats 1.1.0 移植的本地存档分析应用。采用 **React / TypeScript + Web Worker** 共用界面和引擎，桌面通过 **Tauri 2 + Rust** 接入系统文件。支持《杀戮尖塔》及《杀戮尖塔 2》，两个游戏的数据、筛选、收藏、来源和分析 Worker 独立。
 
 项目位于 `~/project/sts2stats-tauri`。原项目 `~/project/sts2stats` 保留，没有覆盖或搬动原始存档。本目录是新的桌面工程；Android 不在本次移植范围。
 
@@ -14,11 +14,14 @@
 - 原生目录／文件选择、本地事务式导入、自动同步、不同来源的独立归档、旧 `dataset.json` 迁移及导出。
 - 完整旧应用目录／plist 迁移，恢复两游戏历史来源、接受的版本、收藏与筛选；来源归档可在原目录不存在时打开。
 - 轻量启动摘要、延迟加载、跨启动分析与卡池缓存；同条件基准支持 CSV、样本证据和最低样本过滤。
+- 正式 Web 平台：IndexedDB 持久化、只读目录授权与浏览器同步、手动导入降级、来源归档、静态资源 ZIP 及子目录部署。
 - 系统／浅色／深色主题、窄窗口侧栏、统一语义色、不透明固定表头、多选筛选、日期快捷范围和逐项移除条件。
 
 多人记录仅进入多人列表和单局复盘，不进入单人统计。生涯统计从完整单人历史计算；`progress.save` 的累计值另行显示，不与详细记录相加。50 · 通关固定为胜利局数除以非放弃局数。缺失的节点指标不补零。
 
 ## 本地使用
+
+Web 可部署 Release 中的静态资源 ZIP，使用 HTTPS 或 localhost 打开；数据仅存储于当前浏览器，不上传存档。浏览器能力与备份说明见 [docs/web.md](docs/web.md)。
 
 安装包：macOS 13.3+（Apple Silicon / Intel 通用 DMG），Windows 10/11 x64（NSIS EXE / MSI，使用 WebView2）。旧原生应用要求 macOS 15；新应用使用系统 WebView，最低版本由 WebKit 的本地解压 API 决定。
 
@@ -34,7 +37,7 @@
 
 ## 本地开发、构建与发布
 
-依赖安装、检查、测试、编译和打包均在本地完成，不使用 GitHub Actions。GitHub 仅保存源码与 Release 安装包。仓库指南见 [AGENTS.md](AGENTS.md)，操作步骤与验证边界见 [docs/local-build.md](docs/local-build.md)。
+Windows、macOS 与 Web 的依赖安装、检查、测试、编译和打包均在本地完成，不使用 GitHub Actions。GitHub 仅保存源码与 Release 安装包。仓库指南见 [AGENTS.md](AGENTS.md)，操作步骤与验证边界见 [docs/local-build.md](docs/local-build.md)。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -42,6 +45,8 @@ pnpm exec playwright install chromium webkit
 pnpm verify
 pnpm build:desktop macos
 pnpm build:desktop windows
+pnpm build:web
+pnpm test:e2e:web
 ```
 
 macOS 生成 Apple Silicon / Intel 通用应用和 DMG；Windows 原生主机生成 x64 NSIS EXE / MSI。macOS 可使用 cargo-xwin、LLVM 和 NSIS 在本地交叉构建 Windows EXE，MSI 需要 Windows 主机。构建产物位于 `src-tauri/target/`，不会进入 Git。安装包、SHA-256 校验和与实际构建说明上传到 [GitHub Releases](https://github.com/Quaternijkon/sts-stats/releases)。
