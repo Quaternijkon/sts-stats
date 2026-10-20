@@ -1,6 +1,8 @@
 # 原生功能对照与补齐 · 2026-10-02
 
-2026-10-03 追加迁移收尾，以下能力已写入代码与合成回归用例，等待本次提交的 GitHub Actions 验证。此前提交的通过状态不代表本轮通过。
+2026-10-20 起改为本地开发、验证与多平台构建，不再使用 GitHub Actions。当前流程见 [local-build.md](local-build.md)；以下云端流程描述为迁移历史。
+
+2026-10-03 追加迁移收尾，以下能力已写入代码与合成回归用例，执行记录以对应提交的实际验证为准。此前提交的通过状态不代表本轮通过。
 
 | 追加范围 | 实现 | 回归覆盖 |
 | --- | --- | --- |
@@ -13,7 +15,7 @@
 
 对照源为相邻 `sts2stats` 工程中的 Swift 视图、AppStore、AnalysisEngine、SaveSyncMonitor、模型与上游 Engine；修改仅位于 Tauri 工程。八个 subagent 分别承担概览、对象、记录、存储、引擎、共用界面、云端流程和独立集成审查。
 
-以下为代码实现与静态审查清单，源码已按用户授权推送到 `codex/native-feature-parity` 分支进行检查和编译。清单本身不代表 TypeScript、Rust、浏览器或安装包验证通过，实际结果以 [Actions](https://github.com/Quaternijkon/sts-stats/actions) 为准。
+以下为代码实现与静态审查清单，源码已按用户授权推送到 `codex/native-feature-parity` 分支进行检查和编译。清单本身不代表 TypeScript、Rust、浏览器或安装包验证通过，实际结果见本地验证记录及 [Releases](https://github.com/Quaternijkon/sts-stats/releases)。
 
 | 范围 | 对照原生入口 | 已补齐的能力 | Tauri 实现与合成回归 |
 | --- | --- | --- | --- |
@@ -29,7 +31,7 @@
 | 导入与同步 | AppStore、AnalysisEngine、SaveSyncMonitor | 捕获导入游戏、加载／提交串行、Profile 根授权与动态解析、来源恢复、失败事务回滚、后台两游戏同步、稳定快照／内容复核、暂停和重试、手动请求不丢失 | appStore、dataset、platform、Rust；importer.test、store-import.test、Rust 合成测试 |
 | 旧数据与存档管理 | Dataset、SettingsView、LocalDataView | Foundation 日期基准、缺失 fileRunIDs 回填、同步状态与时间、打开应用目录、完整累计计数、导出序列化移入 Worker、停止同步后清除 | LocalDataPage、models、Worker operations；importer.test、worker.test、parity.spec |
 | 共用界面与引擎 | DesignSystem、Components、AnalysisEngine | 稳定对象／指标／角色色、缺失值、完整列尺度、六列指标、窄窗／长标题／固定表头／减少动态、六响应及字节缓存上限、请求身份保护、Worker 故障重建 | UI、theme、numericScales、useAnalysis、client；ui-semantics.test、worker.test及合成布局截图 |
-| 云端验证 | 原项目构建与验证流程 | Chromium／WebKit 前端检查、macOS／Windows Rust检查、合成报告 artifact、发布先检查 | Check、Build Desktop、Release；cloud-validation.md |
+| 云端验证 | 原项目构建与验证流程 | Chromium／WebKit 前端检查、macOS／Windows Rust检查、合成报告 artifact、发布先检查 | Check、Build Desktop、Release；local-build.md |
 
 ## 兼容与口径
 
@@ -40,8 +42,8 @@
 - 游戏译名沿用官方库，并通过指定翻译工具核对新增或修改用词。例如 v0.111.0 `CUSTOM_RUN_SCREEN.MODIFIERS_TITLE` 为“特效”，`MULTIPLAYER_LOAD_MENU.ACT` 为“阶段：{act}”。ID 和表达式不变，原工程与生成本地化资源未修改。
 - 原存档只读；导出经用户选择目标，原始 `.run` 使用 `.run.json` 文件名。测试、报告和将来的截图只使用合成数据及仓库确定性夹具。
 
-## 云端验证
+## 验证方式变更
 
-本轮遵守目标 AGENTS.md，没有本地安装、检查、测试、构建、预览或打包。用户授权后将代码推送到现有仓库的独立分支，执行 Check 并依据实际结果修正 TypeScript、ESLint、Vitest、双引擎 Playwright、架构审计及两平台 Rust fmt／Clippy／tests 的失败，再通过 Build Desktop 编译安装包；不创建发布标签。
+迁移初期采用云端验证。2026-10-20 按用户指示修订 AGENTS.md，移除 Actions 工作流；所有检查、编译和打包在本地完成，再将代码推送既有仓库，将实际安装包上传到匹配版本的 Release。
 
 实际 macOS／Windows 安装、原生对话框、系统打印及 WebView 交互验收仍需桌面构建和安装包验证。双引擎合成 E2E 与 Rust 测试不代替这一步；签名、公证与发布未执行。

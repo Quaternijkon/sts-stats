@@ -1,18 +1,22 @@
 # 仓库指南
 
-本地工作仅限代码编辑、Git 提交和推送。依赖安装、检查、编译、打包和安装包验证使用 GitHub Actions；不得在本机运行 npm / pnpm 安装、测试、Vite 预览、cargo 或原生构建，不保留本地构建缓存与安装包。
+代码开发、依赖安装、检查、测试、编译、打包和安装包验证均在本地完成。允许在本机运行 npm / pnpm、Vite、cargo 和原生构建，保留供后续构建复用的本地缓存与安装包。不得使用或依赖 GitHub Actions；GitHub 仅用于源码托管和 Release 安装包分发。
 
 - `Engine/` 是原项目上游 TypeScript 解析、Schema、统计和官方本地化。不得直接修改原生项目生成的 engine.js；本工程直接编译上游。
 - `src/` 是 React / TypeScript 前端。状态在 Zustand，文件接口只能经过 `src/services/platform.ts`，重型分析与数据处理在独立 Worker。
 - `src-tauri/` 是 Tauri 2 Rust 原生层；原生读写和扫描放在 spawn_blocking。平台仅 Windows / macOS。
-- `.github/workflows/`、`docs/`、`scripts/`、`tests/` 分别放云端构建、架构、审计及合成测试。
+- `docs/`、`scripts/`、`tests/` 分别放架构与构建说明、本地构建／发布／审计脚本及合成测试。不添加 GitHub Actions 工作流。
 - TypeScript 两空格；Rust cargo fmt。修改保持现有风格，不做无关重排。
 
-## 云端验证
+## 本地验证、构建与发布
 
 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm verify:local`、`pnpm check:version`、`pnpm build`、`pnpm test:e2e`；Rust fmt / clippy / test 使用 src-tauri/Cargo.toml 和 Cargo.lock。
 
-普通推送不产生安装包；PR、main 推送及手动触发 Check。Check 在 Chromium / WebKit 验证合成前端，在 macOS / Windows 验证 Rust。Build Desktop 仅手动或 Release 调用。Release 先通过 Check，再构建，仅 v* 标签发布。三个版本字段和标签须一致。不得擅自推送、绑定别的仓库或发布。
+以上检查在本地执行；前端使用 Chromium / WebKit 和合成数据，Rust 使用本地受支持平台工具链。必须在本地完成 macOS 与 Windows 的发行构建；macOS 生成 Apple Silicon / Intel 通用 DMG，Windows 生成 x64 NSIS EXE，在具备 WiX 环境时同时生成 MSI。允许使用本地交叉工具链；交叉编译、安装包结构检查和目标系统安装运行验证须分别如实记录，不能互相冒充。
+
+先修复本地检查失败，再从同一提交构建、验证并发布。三个版本字段、Cargo.lock 和 v* 标签须一致。源码推送到既有 origin；安装包、校验和及不含个人数据的构建说明上传 GitHub Release，不提交安装包、依赖、缓存、测试报告或调试符号到 Git。不要创建 Actions 运行、转用云端 runner 或将未生成的产物写成已完成。
+
+推送和发布以当前会话的用户授权为准；已明确授权后，完成相应推送与 Release 发布无需重复确认。不得擅自绑定其他仓库。
 
 ## 数据约束
 

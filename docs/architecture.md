@@ -26,4 +26,4 @@ Rust 的文件选择、目录扫描和读写在 `spawn_blocking` 中执行。扫
 
 本次仅支持 Windows 和 macOS。Android SAF 需要另行实现 platform adapter、Rust/Kotlin 授权目录插件和移动宿主工作流；本工程不会将浏览器目录 API 冒充 Android 原生存档访问。
 
-原生进程持有应用数据目录的跨平台文件锁，防止第二实例写入同一数据或清理正在进行的迁移。标准库文件锁要求 Rust 1.89+，GitHub Actions 使用 stable；应用支持的操作系统版本不变。
+原生进程持有应用数据目录的跨平台文件锁，防止第二实例写入同一数据或清理正在进行的迁移。标准库文件锁要求 Rust 1.89+，本地使用 Rust stable；应用支持的操作系统版本不变。

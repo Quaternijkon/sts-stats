@@ -11,3 +11,4 @@ playwright-report/
 dataset.json
 saves/
 Validation/private/
+.local-build/

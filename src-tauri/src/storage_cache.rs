@@ -233,7 +233,7 @@ fn prune(directory: &Path) {
             Some((entry.path(), meta.len(), meta.modified().ok()?))
         })
         .collect();
-    files.sort_by(|left, right| right.2.cmp(&left.2));
+    files.sort_by_key(|entry| std::cmp::Reverse(entry.2));
     let mut bytes = 0u64;
     for (index, (path, size, _)) in files.into_iter().enumerate() {
         bytes = bytes.saturating_add(size);

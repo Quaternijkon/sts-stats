@@ -14,7 +14,9 @@
     "test:e2e": "playwright test",
     "tauri": "tauri",
     "verify:local": "node scripts/verify-local.mjs",
-    "check:version": "node scripts/check-version.mjs"
+    "check:version": "node scripts/check-version.mjs",
+    "verify": "node scripts/verify-desktop.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

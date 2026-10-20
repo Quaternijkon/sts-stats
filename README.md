@@ -32,40 +32,20 @@
 
 数据存放在操作系统的应用数据目录，具体路径在「存档管理」显示。源目录只读；归档保存应用自有副本。任何文件解析失败时不提交本次同步。原目录删除历史文件后，已导入历史仍保留。同一对局按开始时间、种子、玩家和模式识别，重命名不会重复计数，同名但不同对局不会互相覆盖。同时间、不同内容的冲突版本会被拒绝。
 
-## 本地写代码，GitHub 构建
+## 本地开发、构建与发布
 
-本地工作仅限代码编辑、Git 提交和推送。依赖安装、检查、编译、打包均由 GitHub runner 执行。项目仓库为 [Quaternijkon/sts-stats](https://github.com/Quaternijkon/sts-stats)，在 [Actions 页面](https://github.com/Quaternijkon/sts-stats/actions) 手动运行 **Build Desktop** 获取 Windows 和 macOS 安装包。
-
-| 工作流 | 触发 | 结果 |
-| --- | --- | --- |
-| Check | PR、`main` 推送、手动、Release 前置调用 | ESLint、TypeScript、Vitest、本地架构审计、生产前端构建、Chromium / WebKit Playwright、macOS / Windows Rust fmt / Clippy / tests |
-| Build Desktop | 手动、Release 调用 | macOS 通用 DMG；Windows x64 NSIS EXE 和 MSI |
-| Release | `v*` 标签、手动 | 调用桌面构建；仅标签下创建 GitHub Release |
-
-普通功能分支推送不会运行 Check，需创建 PR 或手动触发；普通推送不会生成安装包。Artifacts 名称为 `sts2stats-macos` 和 `sts2stats-windows`。Release 必须先通过完整 Check，再生成安装包；在普通分支手动运行 Release 只检查和构建，不创建发布版本。合成截图、失败 trace 及测试报告保存在 `synthetic-frontend-validation` artifact。
-
-Runner 安装 Node.js 22、pnpm 10.15.1、Rust stable；依赖使用 `pnpm-lock.yaml` 和 `Cargo.lock`。发布时同步 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本，提交后推送匹配的 `v版本` 标签。`check:version` 会检查三个版本和标签一致性。
-
-新工程推送到 `Quaternijkon/sts-stats`。`main` 推送触发 Check；安装包通过手动 Build Desktop 构建。
-
-macOS 采用临时签名且未公证，Windows 未配置正式代码签名。正式分发前可另行配置签名证书。当前工程没有 Android 构建或 SAF 插件。
-
-## 云端验证与结构
-
-以下命令由 GitHub Actions 执行：
+依赖安装、检查、测试、编译和打包均在本地完成，不使用 GitHub Actions。GitHub 仅保存源码与 Release 安装包。仓库指南见 [AGENTS.md](AGENTS.md)，操作步骤与验证边界见 [docs/local-build.md](docs/local-build.md)。
 
 ```sh
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm verify:local
-pnpm check:version
-pnpm build
-pnpm exec playwright install --with-deps chromium webkit
-pnpm test:e2e
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+pnpm install --frozen-lockfile
+pnpm exec playwright install chromium webkit
+pnpm verify
+pnpm build:desktop macos
+pnpm build:desktop windows
 ```
 
-架构见 [docs/architecture.md](docs/architecture.md)，功能逐项对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)，云端流程及验证边界见 [docs/cloud-validation.md](docs/cloud-validation.md)。检查状态和安装包下载见 [Actions](https://github.com/Quaternijkon/sts-stats/actions)，不将静态审查视作检查通过。纯本地运行，没有账号、服务器、远程分析或遥测。示例与截图仅使用合成数据。禁止把个人存档、账户标识或用户数据集提交进仓库、公共资源或报告。
+macOS 生成 Apple Silicon / Intel 通用应用和 DMG；Windows 原生主机生成 x64 NSIS EXE / MSI。macOS 可使用 cargo-xwin、LLVM 和 NSIS 在本地交叉构建 Windows EXE，MSI 需要 Windows 主机。构建产物位于 `src-tauri/target/`，不会进入 Git。安装包、SHA-256 校验和与实际构建说明上传到 [GitHub Releases](https://github.com/Quaternijkon/sts-stats/releases)。
+
+构建成功、安装包结构检查和目标系统安装运行验证分别记录。macOS 当前使用临时签名且未公证，Windows 未配置正式代码签名。只有实际生成的产物才会上传，不将交叉构建冒充 Windows 实机验收。
+
+架构见 [docs/architecture.md](docs/architecture.md)，功能对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)。纯本地运行，没有账号、服务器、远程分析或遥测。测试、示例与截图只用合成数据；个人存档、账户标识和用户数据集不得进入仓库或产物。

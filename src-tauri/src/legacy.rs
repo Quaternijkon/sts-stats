@@ -532,29 +532,44 @@ struct Backup {
 fn rollback(directory: &Path, root: &Path, originals: &[Backup]) -> Result<(), String> {
     let mut failures = Vec::new();
     for backup in originals.iter().rev() {
-        if !backup.target.starts_with(root)
-            || backup
-                .target
-                .components()
-                .any(|part| matches!(part, std::path::Component::ParentDir))
-        {
-            return Err("迁移恢复目标无效".into());
-        }
-        confined_storage_path(root, &backup.target)?;
-        let result = match &backup.original {
-            Some(path)
-                if path.starts_with(directory)
-                    && !path
-                        .components()
-                        .any(|part| matches!(part, std::path::Component::ParentDir)) =>
+        let result = (|| {
+            if !backup.target.starts_with(root)
+                || backup
+                    .target
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
             {
-                confined_storage_path(directory, path)?;
-                atomic_copy(path, &backup.target)
+                return Err("迁移恢复目标无效".into());
             }
-            Some(_) => return Err("迁移恢复副本无效".into()),
-            None if backup.target.exists() => fs::remove_file(&backup.target).map_err(error),
-            None => Ok(()),
-        };
+            match &backup.original {
+                Some(path)
+                    if path.starts_with(directory)
+                        && !path
+                            .components()
+                            .any(|part| matches!(part, std::path::Component::ParentDir)) =>
+                {
+                    confined_storage_path(root, &backup.target)?;
+                    confined_storage_path(directory, path)?;
+                    atomic_copy(path, &backup.target)
+                }
+                Some(_) => Err("迁移恢复副本无效".into()),
+                None => match fs::symlink_metadata(&backup.target) {
+                    Ok(_) => {
+                        confined_storage_path(root, &backup.target)?;
+                        fs::remove_file(&backup.target).map_err(error)
+                    }
+                    Err(failure)
+                        if matches!(
+                            failure.kind(),
+                            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                        ) =>
+                    {
+                        Ok(())
+                    }
+                    Err(failure) => Err(error(failure)),
+                },
+            }
+        })();
         if let Err(failure) = result {
             failures.push(failure);
         }
@@ -885,16 +900,41 @@ mod tests {
         atomic(&old, "old").unwrap();
         atomic(&staged, "new").unwrap();
         atomic(&blocked, "blocked parent").unwrap();
-        assert!(replace_all(
+        let failure = replace_all(
             directory.path(),
             directory.path(),
             &[
                 (old.clone(), staged.clone()),
-                (blocked.join("dataset.json"), staged)
-            ]
+                (blocked.join("dataset.json"), staged),
+            ],
         )
-        .is_err());
+        .unwrap_err();
+        assert!(!failure.contains("migration rollback failed:"));
         assert_eq!(read_text(&old, u64::MAX).unwrap(), "old");
+        assert!(!directory.path().join("journal.json").exists());
+    }
+    #[test]
+    fn restores_remaining_checkpoints_when_one_recovery_target_is_invalid() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let session = root.path().join(".legacy-migration-synthetic");
+        let target = root.path().join("sts2/dataset.json");
+        let original = session.join("backups/0");
+        atomic(&target, "partially-committed").unwrap();
+        atomic(&original, "original").unwrap();
+        let backups = vec![
+            Backup {
+                target: target.clone(),
+                original: Some(original),
+            },
+            Backup {
+                target: outside.path().join("outside.json"),
+                original: None,
+            },
+        ];
+        assert!(rollback(&session, root.path(), &backups).is_err());
+        assert_eq!(read_text(&target, u64::MAX).unwrap(), "original");
+        assert!(!outside.path().join("outside.json").exists());
     }
     #[test]
     fn recovers_interrupted_migration_before_reading_authoritative_data() {
