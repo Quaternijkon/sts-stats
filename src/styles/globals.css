@@ -1662,3 +1662,25 @@ th button {
     break-inside: avoid;
   }
 }
+
+.account-form {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+}
+.account-form label {
+  display: grid;
+  gap: 8px;
+}
+.account-form input {
+  min-width: 0;
+  width: 100%;
+}
+.account-form, .sync-conflict {
+  margin-top: 16px;
+}
+.sync-conflict {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}

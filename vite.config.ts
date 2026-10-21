@@ -21,16 +21,17 @@ for (const file of [...engineFiles("Engine"), ...engineFiles("src/worker"),
 export default defineConfig(({ mode }) => ({
   base: mode === "web" ? "./" : "/",
   plugins: [react(), tailwindcss(), ...(mode === "web" ? [{
-    name: "web-local-data-policy",
+    name: "web-data-policy",
     transformIndexHtml: () => [{ tag: "meta", injectTo: "head-prepend" as const,
-      attrs: { "http-equiv": "Content-Security-Policy", content: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'" } }],
+      attrs: { "http-equiv": "Content-Security-Policy", content: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'" } }],
   }] : [])],
   define: { __STATS_ENGINE_VERSION__: JSON.stringify(engineDigest.digest("hex")), __STATS_WEB_BUILD__: JSON.stringify(mode === "web") },
-  server: { host: "127.0.0.1", port: 1420, strictPort: true },
+  server: { host: "127.0.0.1", port: 1420, strictPort: true, proxy: { "/api/v1": "http://127.0.0.1:18765" } },
   build: { target: "esnext", outDir: mode === "web" ? "dist-web" : "dist" },
   worker: { format: "es" },
   test: {
     include: ["Engine/**/*.test.ts", "tests/**/*.test.ts"],
     environment: "node",
+    maxWorkers: 4,
   },
 }));

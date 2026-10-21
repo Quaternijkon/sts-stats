@@ -2,6 +2,7 @@ import type { Dataset, GameVersion, StatsPlatform } from "../models";
 import { BrowserDatabase } from "./database";
 import { BrowserFiles, pickFiles } from "./files";
 import { PreferenceJournal } from "./preferences";
+import { browserAccountRequest } from "../sync/transport";
 
 let dropTarget: BrowserFiles | null = null;
 export function stageBrowserDrop(transfer: DataTransfer) { dropTarget?.stageDrop(transfer); }
@@ -44,6 +45,7 @@ export function createBrowserPlatform(): StatsPlatform {
     if (current?.games[game]?.source !== source) throw new Error("其他标签页已更改同步来源，请重新读取当前游戏");
   };
   return {
+    accountRequest: browserAccountRequest,
     takeDroppedSources: () => files.takeDropped(),
     chooseDirectory: () => files.chooseDirectory(),
     chooseFiles: () => files.chooseFiles(),

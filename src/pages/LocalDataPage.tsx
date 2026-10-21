@@ -9,6 +9,7 @@ import { formatValue } from "../styles/theme";
 import { zhCharacter } from "../../Engine/domain/i18n";
 import type { StorageSummary } from "../worker/operations";
 import { LegacyMigration, SourceArchives } from "./local/LegacyMigration";
+import { AccountSync } from "./local/AccountSync";
 
 function progressCount(row: Record<string, unknown>, key: "wins" | "losses") {
   if (Array.isArray(row.recordedFields) && !row.recordedFields.includes(key)) return "—";
@@ -139,6 +140,7 @@ export function LocalDataPage() {
 export function SettingsPage() {
   const { settings, setSettings, busy } = useAppStore();
   return <div style={{ display: "contents" }} data-analysis-ready="true">
+    <AccountSync />
     <Card title="偏好"><div className="settings-list">
       <label>外观<select disabled={busy} value={settings.theme} onChange={(event) => setSettings({ theme: event.target.value as typeof settings.theme })}>
         <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>

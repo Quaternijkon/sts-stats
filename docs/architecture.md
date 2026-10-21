@@ -8,7 +8,7 @@ React 视图 / Zustand 状态
 
 `Engine/` 保留原项目的解析、Schema、对象注册表、查询、统计、竞技场、流派及官方中文库。新界面直接导入上游 TypeScript；不使用、修改或分发原生项目打包后的 `engine.js`。官方本地化资源来自原项目的上游文件，不在页面内复制译名。
 
-`src/services/platform.ts` 是文件、目录、导入导出和偏好持久化的唯一平台接口。安装应用通过受限 Rust commands 操作；浏览器 adapter 支持正式 Web 平台，以 IndexedDB 保存数据及偏好，以只读目录句柄或文件选择器导入。界面不获得任意原生文件写入权限。目录授权由原生选择器或 OS 拖放事件创建并持久化；拖放接口只消费原生事件保存的路径，不接受前端传入任意路径。重新扫描要求与已授权规范路径相同。无 HTTP、shell 或广泛 filesystem capability，CSP 禁止远程连接和脚本。
+`src/services/platform.ts` 是文件、目录、导入导出和偏好持久化的唯一平台接口。安装应用通过受限 Rust commands 操作；浏览器 adapter 支持正式 Web 平台，以 IndexedDB 保存数据及偏好，以只读目录句柄或文件选择器导入。界面不获得任意原生文件写入权限。目录授权由原生选择器或 OS 拖放事件创建并持久化；拖放接口只消费原生事件保存的路径，不接受前端传入任意路径。重新扫描要求与已授权规范路径相同。无通用 HTTP、shell 或广泛 filesystem capability。Web CSP 仅允许同源 API；桌面 CSP 仅允许 IPC，账户 HTTP 由 Rust 的固定域名、固定路由适配器提供，禁止重定向；会话使用系统凭据存储。
 
 Rust 的文件选择、目录扫描和读写在 `spawn_blocking` 中执行。扫描跳过隐藏目录和符号链接，按 profile.save 选择当前 Profile，拒绝多个账号／来源、多个 progress.save 及读取过程中变动的文件；错误会明确返回，不静默截断。权威数据不再使用 32 MiB 单文件、50,000 文件或 512 MiB 数据集的固定上限。授权保留用户所选根目录，实际 Profile 来源每次解析并独立归档。后台每 2 秒比较元数据指纹，连续稳定快照后同步，每 60 秒复核内容；启动及回到前台立即检查。失败保留当前数据并自动重试，各游戏的暂停开关独立。所有 `.run` 和 `progress.save` 均只读；原始存档导出使用 `.run.json`，且不能写入授权来源目录。
 
@@ -27,3 +27,5 @@ Rust 的文件选择、目录扫描和读写在 `spawn_blocking` 中执行。扫
 本工程支持 Windows、macOS 和 Web。Web 使用同一 Engine、Worker 与界面，平台存储和文件授权实现位于 src/services/browser，所有入口仍经过 platform.ts。Web 构建使用相对资源路径、独立生产 CSP 和静态 ZIP，具体见 [web.md](web.md)。Android SAF 需要另行实现 platform adapter、Rust/Kotlin 授权目录插件和移动宿主工作流；本工程不会将浏览器目录 API 冒充 Android 原生存档访问。
 
 原生进程持有应用数据目录的跨平台文件锁，防止第二实例写入同一数据或清理正在进行的迁移。标准库文件锁要求 Rust 1.89+，本地使用 Rust stable；应用支持的操作系统版本不变。
+
+可选账户同步通过 platform.ts 进入浏览器同源 transport 或受限原生 account_request。Worker 负责路径剥离、快照指纹与校验；Zustand 持有账户状态及每游戏基准修订。自托管 Node / SQLite 只验证认证、账户隔离和 CAS 修订，保存快照，不运行分析引擎。注册登录不上传，用户显式启用后可在 Android 浏览器查看。冲突、备份和本地部署流程见 [self-hosting.md](self-hosting.md)。

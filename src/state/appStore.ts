@@ -7,6 +7,7 @@ import { platform } from "../services/platform";
 import { emptyDataset } from "../services/dataset";
 import type { ImportTransaction } from "../services/dataset";
 import type { Dataset, DatasetSnapshot, DatasetSummary, GameVersion, FilterSpec, Preferences, SaveFile, LegacySelection } from "../services/models";
+import type { AccountSyncSettings, PreparedCloud } from "../services/sync/types";
 
 const defaults: Preferences = {
   selectedGame: "sts2",
@@ -70,6 +71,15 @@ function withEngine<T>(game: GameVersion, operation: () => Promise<T>): Promise<
 }
 function cleanPreferences(value: Preferences): Preferences {
   const result = structuredClone(defaults);
+  if (value.accountSync && typeof value.accountSync === "object") {
+    const saved = value.accountSync;
+    result.accountSync = { enabled: saved.enabled === true, accountId: typeof saved.accountId === "string" ? saved.accountId : undefined, games: {} };
+    for (const game of ["sts1", "sts2"] as const) {
+      const checkpoint = saved.games?.[game];
+      if (checkpoint && Number.isSafeInteger(checkpoint.revision) && checkpoint.revision > 0 &&
+        /^[a-f0-9]{64}$/.test(checkpoint.fingerprint) && Number.isFinite(checkpoint.updated)) result.accountSync.games[game] = checkpoint;
+    }
+  }
   if (value.selectedGame === "sts1" || value.selectedGame === "sts2") result.selectedGame = value.selectedGame;
   if (["system", "light", "dark"].includes(value.theme)) result.theme = value.theme;
   if (Number.isInteger(value.minimumSample))
@@ -99,6 +109,10 @@ function cleanPreferences(value: Preferences): Preferences {
   return result;
 }
 interface AppState {
+  accountSync: AccountSyncSettings;
+  setAccountSync(settings: AccountSyncSettings): Promise<void>;
+  prepareAccountSnapshot(game: GameVersion, includePayload?: boolean): Promise<PreparedCloud & { identity: string; favorites: string }>;
+  applyAccountSnapshot(game: GameVersion, text: string, accountId: string, identity: string, favorites: string): Promise<void>;
   game: GameVersion;
   page: string;
   dataset: DatasetSummary;
@@ -315,6 +329,57 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   }
   return {
+    accountSync: { enabled: false, games: {} },
+    async setAccountSync(settings) {
+      preferences.accountSync = structuredClone(settings);
+      set({ accountSync: preferences.accountSync });
+      persist();
+      await persistQueue;
+    },
+    async prepareAccountSnapshot(game, includePayload = false) {
+      if (get().busy) throw new Error("本地数据正在更新，请稍后同步");
+      return withEngine(game, async () => {
+        const snapshot = await platform.openDataset(game);
+        await analysisClient(game).call({ op: "open", game, snapshot });
+        if (get().ready && loaded[game]?.identity !== snapshot.identity) publishDataset(game, snapshot);
+        else loaded[game] = snapshot;
+        const favorites = [...preferences.games[game].favorites];
+        const result = await analysisClient(game).call<PreparedCloud>({ op: "prepareCurrentCloud", includePayload, favorites, game });
+        return { ...result, identity: loaded[game]!.identity, favorites: JSON.stringify(favorites) };
+      });
+    },
+    async applyAccountSnapshot(game, text, accountId, identity, favorites) {
+      if (get().busy) throw new Error("本地数据正在更新，请稍后同步");
+      await operation(game, async () => {
+        const previous = await currentDataset(game);
+        const guard = () => {
+          if (get().accountSync.accountId !== accountId || !get().accountSync.enabled) throw new Error("账户同步状态已更改，本机数据保留");
+          if (JSON.stringify(preferences.games[game].favorites) !== favorites) throw new Error("本机收藏已更新，请重新同步");
+        };
+        guard();
+        if (loaded[game]!.identity !== identity) throw new Error("本机数据已更新，请重新同步");
+        const remote = await analysisClient(game).call<Awaited<ReturnType<typeof import("../services/sync/payload")["parseCloud"]>>>({ op: "parseCloud", game, text });
+        const local = await analysisClient(game).call<PreparedCloud>({ op: "prepareCloud", dataset: previous, favorites: preferences.games[game].favorites, game });
+        guard();
+        if (local.datasetFingerprint !== remote.datasetFingerprint) {
+          // Save a separate source archive before a cloud replacement, including conflicts.
+          if (previous.runs.length || previous.progress) {
+            const backup = { ...previous, source: `同步备份 ${new Date().toISOString()} ${crypto.randomUUID().slice(0, 8)}` };
+            await commit(game, backup, previous);
+          }
+          guard();
+          const dataset = { ...remote.dataset, source: previous.source || `account:${accountId}:${game}`,
+            manifest: previous.manifest, fileRunIDs: previous.fileRunIDs, importMetadata: previous.importMetadata };
+          await commit(game, dataset, previous);
+        }
+        guard();
+        preferences.games[game].favorites = remote.favorites;
+        if (get().game === game) set({ favorites: remote.favorites });
+        set((state) => ({ archiveRevision: state.archiveRevision + 1 }));
+        persist();
+        await persistQueue;
+      }, false);
+    },
     game: "sts2", page: "home", dataset: emptyDataset(),
     characters: ["Ironclad", "Silent", "Regent", "Necrobinder", "Defect"],
     filter: structuredClone(EMPTY_FILTER), revision: 0, archiveRevision: 0, ready: false, busy: false, error: null,
@@ -329,7 +394,7 @@ export const useAppStore = create<AppState>((set, get) => {
           for (const game of ["sts1", "sts2"] as const)
             syncStates[game].status = preferences.games[game].source
               ? preferences.games[game].autoSync ? "等待同步" : "已暂停" : "未选择同步文件夹";
-          set({ game: preferences.selectedGame ?? get().game, settings: { theme: preferences.theme, minimumSample: preferences.minimumSample,
+          set({ accountSync: preferences.accountSync ?? { enabled: false, games: {} }, game: preferences.selectedGame ?? get().game, settings: { theme: preferences.theme, minimumSample: preferences.minimumSample,
             autoSync: preferences.games[get().game].autoSync ?? preferences.autoSync } });
           publishSync(get().game);
         } catch (error) { set({ error: message(error), ready: false }); }
@@ -351,7 +416,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       preferences = next;
       const current = preferences.games[get().game];
-      set({ favorites: current.favorites, settings: { theme: next.theme, minimumSample: next.minimumSample, autoSync: current.autoSync ?? next.autoSync },
+      set({ accountSync: next.accountSync ?? { enabled: false, games: {} }, favorites: current.favorites, settings: { theme: next.theme, minimumSample: next.minimumSample, autoSync: current.autoSync ?? next.autoSync },
         filter: pageFilter(get().page, { ...structuredClone(EMPTY_FILTER), ...(current.pageFilters?.[filterScope(get().page)] ?? get().filter) }) });
       publishSync(get().game);
     },
@@ -410,7 +475,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     resetFilter() { get().setFilter(structuredClone(EMPTY_FILTER)); },
     toggleFavorite(id) {
-      if (get().migrationStatus) return;
+      if (get().migrationStatus || get().busy) return;
       const favorites = get().favorites.includes(id) ? get().favorites.filter((f) => f !== id) : [...get().favorites, id];
       preferences.games[get().game].favorites = favorites;
       set({ favorites });
@@ -564,6 +629,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     async clearData() {
       const game = get().game;
+      await get().setAccountSync({ ...get().accountSync, enabled: false });
       stopSource(game);
       // Stop the subscription first, then let an atomic write finish before deleting.
       while (activeOperation) await activeOperation.catch(() => {});

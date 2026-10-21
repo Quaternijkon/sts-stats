@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up private STS2Stats account data
+
+[Service]
+Type=oneshot
+User=sts2stats-sync
+Group=sts2stats-sync
+EnvironmentFile=/etc/sts2stats-tauri.env
+ExecStart=/opt/sts2stats-tauri/current/runtime/bin/node /opt/sts2stats-tauri/current/server/admin.mjs backup
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sts2stats-tauri

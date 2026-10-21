@@ -13,3 +13,5 @@ dataset.json
 saves/
 Validation/private/
 .local-build/
+*.sqlite
+*.sqlite-*

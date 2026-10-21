@@ -1,0 +1,25 @@
+[Unit]
+Description=STS2Stats Web and private account synchronization
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sts2stats-sync
+Group=sts2stats-sync
+EnvironmentFile=/etc/sts2stats-tauri.env
+WorkingDirectory=/opt/sts2stats-tauri/current
+ExecStart=/opt/sts2stats-tauri/current/runtime/bin/node /opt/sts2stats-tauri/current/server/main.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sts2stats-tauri
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

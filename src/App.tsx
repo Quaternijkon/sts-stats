@@ -16,6 +16,7 @@ import {
   Network,
 } from "lucide-react";
 import { useAppStore } from "./state/appStore";
+import { useAccountStore } from "./state/accountStore";
 import type { ObjectKind } from "../Engine/domain/objectTypes";
 import {
   Card,
@@ -158,6 +159,12 @@ export function App() {
   const pageScroll = usePageScroll(`${state.game}/${state.page}`);
   useEffect(() => {
     void useAppStore.getState().initialize();
+    void useAccountStore.getState().initialize();
+    const sync = () => { if (document.visibilityState !== "hidden") void useAccountStore.getState().sync(); };
+    const timer = setInterval(sync, 15000);
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => { clearInterval(timer); window.removeEventListener("focus", sync); document.removeEventListener("visibilitychange", sync); };
   }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = state.settings.theme;

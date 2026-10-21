@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily STS2Stats private backup
+
+[Timer]
+OnCalendar=*-*-* 04:25:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

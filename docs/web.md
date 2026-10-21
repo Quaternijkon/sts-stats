@@ -1,6 +1,6 @@
 # Web 平台
 
-Web、Windows 和 macOS 共用 React 界面、Zustand 状态、Engine 解析统计及每游戏独立 Worker。`platform.ts` 选择浏览器或原生适配器。Web 不需要 Tauri 宿主、分析服务、账号或数据库服务器，文件内容与计算结果保存在用户设备上。
+Web、Windows 和 macOS 共用 React 界面、Zustand 状态、Engine 解析统计及每游戏独立 Worker。`platform.ts` 选择浏览器或原生适配器。匿名使用不需要 Tauri 宿主或数据库服务器。可选自托管账户支持电脑和 Android 浏览器同步当前数据集与收藏，见 [self-hosting.md](self-hosting.md)。
 
 ## 构建与部署
 
@@ -12,7 +12,7 @@ pnpm test:e2e:web
 
 `dist-web/` 是可部署的完整静态站点；`.local-build/releases/v版本/STS2Stats_版本_web.zip` 是发行包。将 ZIP 解压后的内容交给 HTTPS 静态托管即可，也支持站点子目录，不需要 SPA 路由重写或 API。不能直接用 `file://` 双击打开。`pnpm preview:web` 在 `http://127.0.0.1:1421/sts2stats/` 验证实际生产包和子目录资源路径。
 
-网页只从站点加载自身资源，生产 CSP 禁止数据连接（`connect-src 'none'`）。导入文件不会上传。无需在托管端接收存档、配置服务器存储或添加遥测。
+网页只从站点加载自身资源，生产 CSP 仅允许同源数据连接（`connect-src 'self'`）。注册和登录不会上传存档，主动启用账户同步后才上传两游戏当前数据集与收藏。静态托管仍可独立使用匿名功能；可选账户由同源自托管服务提供，不添加遥测。
 
 ## 浏览器能力
 

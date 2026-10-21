@@ -42,7 +42,7 @@ async function reopen(page: Page) {
 
 test("manual save import survives reload and export; a corrupt import leaves it intact", async ({ page }) => {
   await prepare(page);
-  if (new URL(page.url()).port === "1421") await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", /connect-src 'none'/);
+  if (new URL(page.url()).port === "1421") await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", /connect-src 'self'/);
   const picker = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "导入文件", exact: true }).click();
   await (await picker).setFiles({ name: "synthetic.run", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(raw(100))) });

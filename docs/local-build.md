@@ -4,7 +4,7 @@
 
 ## 准备与检查
 
-需要 Node.js 22+、pnpm 10.15.1、Rust stable（至少 1.89）和当前平台的桌面开发工具链。首次执行：
+需要 Node.js 24+（账户服务和测试使用内置 SQLite）、pnpm 10.15.1、Rust stable（至少 1.89）和当前平台的桌面开发工具链。首次执行：
 
 ```sh
 pnpm install --frozen-lockfile

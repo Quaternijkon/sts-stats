@@ -3,6 +3,7 @@ import type { Dataset, SaveFile, ImportSelection, Preferences, StatsPlatform,
   ArchiveSummary, DatasetSnapshot, LegacySelection, LegacySourceData } from "./models";
 import { ENGINE_VERSION } from "./cacheVersion";
 import { createBrowserPlatform } from "./browser";
+import { browserAccountRequest } from "./sync/transport";
 export { stageBrowserDrop } from "./browser";
 export { PREFERENCE_JOURNAL } from "./browser/preferences";
 
@@ -15,11 +16,13 @@ export const platformCapabilities = {
   persistentStorage: !isDesktop && typeof navigator !== "undefined" && typeof navigator.storage?.persist === "function",
 };
 export function sourceLabel(source: string) {
+  if (source.startsWith("account:")) return "账户同步";
   const match = /^web-(?:directory|files):[^:]+:([^/]*)(.*)$/.exec(source);
   if (!match) return source;
   try { return decodeURIComponent(match[1]) + match[2]; } catch { return source; }
 }
 const native: StatsPlatform = {
+  accountRequest: (method, route, body, accountId) => invoke("account_request", { method, route, body, accountId }),
   async requestSourceAccess() { return true; },
   async storageInfo() { return { usage: null, quota: null, persistent: null }; },
   async requestPersistence() { return false; },
@@ -66,6 +69,7 @@ const native: StatsPlatform = {
 const adapter = isDesktop ? native : createBrowserPlatform();
 export const platform: StatsPlatform = {
   ...adapter,
+  accountRequest: isDesktop ? native.accountRequest : browserAccountRequest,
   async exportText(name, text) {
     try {
       return await adapter.exportText(name, text);

@@ -12,6 +12,7 @@ use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use walkdir::WalkDir;
 
+mod account;
 mod legacy;
 mod storage_cache;
 
@@ -800,6 +801,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            account::account_request,
             take_dropped_sources,
             snapshot_directory,
             resolve_directory,

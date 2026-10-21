@@ -4,6 +4,8 @@ import type { Dataset, DatasetSnapshot, GameVersion } from "../services/models";
 import type { WorkerStorage } from "./storage";
 import { emptyDataset, validateDataset } from "../services/dataset";
 import { storageSummary } from "./operations";
+import { prepareCloud } from "../services/sync/payload";
+import type { PreparedCloud } from "../services/sync/types";
 
 const cachedOperations = new Set([
   "dashboard", "restAnalysis", "query", "runs", "runPage", "coop", "arena", "archetypes",
@@ -23,9 +25,10 @@ export class AnalysisRuntime {
   private poolsReady = false;
   private cache = new Map<string, { result: unknown; bytes: number }>();
   private bytes = 0;
+  private cloud: { identity: string; favorites: string; prepared: PreparedCloud } | null = null;
   constructor(private storage: WorkerStorage, private engine = dispatch) {}
 
-  private clearMemory() { this.cache.clear(); this.bytes = 0; }
+  private clearMemory() { this.cache.clear(); this.bytes = 0; this.cloud = null; }
   private async ensureLoaded() {
     if (this.engineLoaded && this.poolsReady) return;
     if (!this.dataset) {
@@ -88,6 +91,18 @@ export class AnalysisRuntime {
       if (!dataset) throw new Error("分析数据尚未载入");
       const result = storageSummary(dataset);
       return { result, bytes: JSON.stringify(result).length * 2 };
+    }
+    if (request.op === "prepareCurrentCloud") {
+      const identity = this.snapshot?.identity ?? "staged";
+      const favorites = JSON.stringify([...(request.favorites as string[])].sort());
+      let prepared = this.cloud?.identity === identity && this.cloud.favorites === favorites ? this.cloud.prepared : null;
+      if (!prepared || request.includePayload && !prepared.payload) {
+        await this.ensureLoaded();
+        prepared = await prepareCloud(this.dataset!, request.favorites as string[], this.game);
+        this.cloud = { identity, favorites, prepared: { ...prepared, payload: prepared.payload.length * 2 <= 4 * 1024 * 1024 ? prepared.payload : "" } };
+      }
+      const result = request.includePayload ? prepared : { ...prepared, payload: "" };
+      return { result, bytes: result.payload.length * 2 };
     }
     if (["readDataset", "exportDataset"].includes(String(request.op))) {
       await this.ensureLoaded();

@@ -13,7 +13,7 @@ for (const args of [["typecheck"], ["exec", "vite", "build", "--mode", "web"]]) 
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 const version = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8")).version;
-fs.writeFileSync(path.join(cwd, "dist-web", "README.txt"), `STS2Stats ${version} Web\n\nServe this directory over HTTPS or localhost. A site subdirectory is supported.\nAll save processing and browser storage stay on this device. No backend or upload endpoint is needed.\nDirectory synchronization needs a browser with read-only directory authorization; other browsers use manual import.\nExport dataset.json to back up your data before clearing site storage.\n`);
+fs.writeFileSync(path.join(cwd, "dist-web", "README.txt"), `STS2Stats ${version} Web\n\nServe this directory over HTTPS or localhost. A site subdirectory is supported.\nSave parsing and statistics run on this device. Anonymous use needs no backend.\nOptional private account sync requires the separately deployed self-hosted server. Login alone never uploads saves; enable account sync explicitly.\nDirectory synchronization needs a browser with read-only directory authorization; other browsers use manual import.\nExport dataset.json to back up your data before clearing site storage.\n`);
 function files(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);

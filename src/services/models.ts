@@ -1,4 +1,5 @@
 import type { GameVersion } from "../../Engine/domain/game";
+import type { AccountResponse, AccountSyncSettings } from "./sync/types";
 import type {
   CareerProgress,
   NormalizedRunV2,
@@ -76,6 +77,7 @@ export interface ImportSelection {
   files: SaveFile[];
 }
 export interface Preferences {
+  accountSync?: AccountSyncSettings;
   selectedGame?: GameVersion;
   theme: "system" | "light" | "dark";
   minimumSample: number;
@@ -95,6 +97,7 @@ export interface Preferences {
   >;
 }
 export interface StatsPlatform {
+  accountRequest(method: string, route: string, body?: string, accountId?: string): Promise<AccountResponse>;
   takeDroppedSources(): Promise<ImportSelection | null>;
   chooseDirectory(): Promise<ImportSelection | null>;
   chooseFiles(): Promise<SaveFile[]>;

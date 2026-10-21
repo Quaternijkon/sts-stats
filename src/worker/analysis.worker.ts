@@ -8,6 +8,7 @@ import { receiveStorageReply, workerStorage } from "./storage";
 import { legacyPreferences, prepareLegacyDataset } from "../services/legacyMigration";
 import type { Preferences } from "../services/models";
 import { setCurrentGame } from "../../Engine/domain/game";
+import { prepareCloud, parseCloud } from "../services/sync/payload";
 
 let queue = Promise.resolve();
 const runtime = new AnalysisRuntime(workerStorage);
@@ -19,7 +20,9 @@ self.onmessage = ({ data }) => {
       if (request.game === "sts1" || request.game === "sts2") setCurrentGame(request.game);
       let result: unknown;
       let bytes = 0;
-      if (request.op === "arenaSvg") result = arenaSvg(request.result as PreferenceArenaResult, request.order as string[]);
+      if (request.op === "prepareCloud") result = await prepareCloud(request.dataset as Dataset, request.favorites as string[], request.game as GameVersion);
+      else if (request.op === "parseCloud") result = await parseCloud(request.text as string, request.game as GameVersion);
+      else if (request.op === "arenaSvg") result = arenaSvg(request.result as PreferenceArenaResult, request.order as string[]);
       else if (request.op === "arenaCsv") result = arenaCsv(request.result as PreferenceArenaResult, request.order as string[]);
       else if (request.op === "serializeCsv") result = serializeCsv(request.headers as unknown[], request.rows as unknown[][]);
       else if (request.op === "prepareImport") result = await prepareImport(request.previous as Dataset, request.files as SaveFile[], request.source as string, request.game as GameVersion);

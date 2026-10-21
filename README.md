@@ -2,7 +2,7 @@
 
 从原生 STS2Stats 1.1.0 移植的本地存档分析应用。采用 **React / TypeScript + Web Worker** 共用界面和引擎，桌面通过 **Tauri 2 + Rust** 接入系统文件。支持《杀戮尖塔》及《杀戮尖塔 2》，两个游戏的数据、筛选、收藏、来源和分析 Worker 独立。
 
-项目位于 `~/project/sts2stats-tauri`。原项目 `~/project/sts2stats` 保留，没有覆盖或搬动原始存档。本目录是新的桌面工程；Android 不在本次移植范围。
+项目位于 `~/project/sts2stats-tauri`。原项目 `~/project/sts2stats` 保留，没有覆盖或搬动原始存档。Android 可通过 Web 浏览器登录账户查看同步数据。
 
 ## 功能
 
@@ -15,13 +15,14 @@
 - 完整旧应用目录／plist 迁移，恢复两游戏历史来源、接受的版本、收藏与筛选；来源归档可在原目录不存在时打开。
 - 轻量启动摘要、延迟加载、跨启动分析与卡池缓存；同条件基准支持 CSV、样本证据和最低样本过滤。
 - 正式 Web 平台：IndexedDB 持久化、只读目录授权与浏览器同步、手动导入降级、来源归档、静态资源 ZIP 及子目录部署。
+- 可选自托管邀请码账户和多端数据／收藏同步，支持 macOS、Windows 与 Android 浏览器；本地构建后可通过 SSH 部署、检查和回滚。
 - 系统／浅色／深色主题、窄窗口侧栏、统一语义色、不透明固定表头、多选筛选、日期快捷范围和逐项移除条件。
 
 多人记录仅进入多人列表和单局复盘，不进入单人统计。生涯统计从完整单人历史计算；`progress.save` 的累计值另行显示，不与详细记录相加。50 · 通关固定为胜利局数除以非放弃局数。缺失的节点指标不补零。
 
 ## 本地使用
 
-Web 可部署 Release 中的静态资源 ZIP，使用 HTTPS 或 localhost 打开；数据仅存储于当前浏览器，不上传存档。浏览器能力与备份说明见 [docs/web.md](docs/web.md)。
+Web 可部署 Release 中的静态资源 ZIP，使用 HTTPS 或 localhost 打开；匿名使用仅在本机保存数据，主动启用账户同步后上传当前数据集及收藏。站点为 https://sts2stats.quaternijkon.online 。浏览器能力见 [docs/web.md](docs/web.md)，部署和同步步骤见 [docs/self-hosting.md](docs/self-hosting.md)。
 
 安装包：macOS 13.3+（Apple Silicon / Intel 通用 DMG），Windows 10/11 x64（NSIS EXE / MSI，使用 WebView2）。旧原生应用要求 macOS 15；新应用使用系统 WebView，最低版本由 WebKit 的本地解压 API 决定。
 
@@ -53,4 +54,4 @@ macOS 生成 Apple Silicon / Intel 通用应用和 DMG；Windows 原生主机生
 
 构建成功、安装包结构检查和目标系统安装运行验证分别记录。macOS 当前使用临时签名且未公证，Windows 未配置正式代码签名。只有实际生成的产物才会上传，不将交叉构建冒充 Windows 实机验收。
 
-架构见 [docs/architecture.md](docs/architecture.md)，功能对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)。纯本地运行，没有账号、服务器、远程分析或遥测。测试、示例与截图只用合成数据；个人存档、账户标识和用户数据集不得进入仓库或产物。
+架构见 [docs/architecture.md](docs/architecture.md)，功能对照见 [docs/native-parity-2026-10-02.md](docs/native-parity-2026-10-02.md)，移植历史见 [docs/migration.md](docs/migration.md)。解析和统计在本地运行，可选账户仅保存同步快照，没有远程分析或遥测。测试、示例与截图只用合成数据；个人存档、账户标识、邀请码、会话及用户数据集不得进入仓库或产物。
