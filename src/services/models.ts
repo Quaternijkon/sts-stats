@@ -6,6 +6,7 @@ import type {
   FilterSpec,
 } from "../../Engine/domain/types";
 export type { GameVersion, CareerProgress, NormalizedRunV2, FilterSpec };
+export type DirectoryImportMode = "manual" | "sync";
 
 /** importedAt follows Foundation's seconds since 2001-01-01 for native compatibility. */
 export interface Dataset {
@@ -99,7 +100,7 @@ export interface Preferences {
 export interface StatsPlatform {
   accountRequest(method: string, route: string, body?: string, accountId?: string): Promise<AccountResponse>;
   takeDroppedSources(): Promise<ImportSelection | null>;
-  chooseDirectory(): Promise<ImportSelection | null>;
+  chooseDirectory(mode?: DirectoryImportMode): Promise<ImportSelection | null>;
   chooseFiles(): Promise<SaveFile[]>;
   resolveDirectory(directory: string, game?: GameVersion): Promise<string>;
   scanDirectory(directory: string, game?: GameVersion): Promise<SaveFile[]>;

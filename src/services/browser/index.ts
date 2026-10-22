@@ -47,7 +47,7 @@ export function createBrowserPlatform(): StatsPlatform {
   return {
     accountRequest: browserAccountRequest,
     takeDroppedSources: () => files.takeDropped(),
-    chooseDirectory: () => files.chooseDirectory(),
+    chooseDirectory: (mode) => files.chooseDirectory(mode),
     chooseFiles: () => files.chooseFiles(),
     async resolveDirectory(source, game) { await verifySource(source, game); return files.resolve(source); },
     async scanDirectory(source, game) { await verifySource(source, game); return files.scan(source); },

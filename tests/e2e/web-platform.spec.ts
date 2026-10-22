@@ -105,6 +105,50 @@ test("folder fallback selects one Profile and never modifies selected files", as
   await expect(page.getByLabel("自动同步", { exact: true })).toBeDisabled();
 });
 
+test("folder import opens a directory input even when persistent access is available", async ({ page }, info) => {
+  const root = info.outputPath("synthetic-saves");
+  await mkdir(`${root}/history/nested`, { recursive: true });
+  const original = JSON.stringify(raw(100));
+  await writeFile(`${root}/first.run`, original);
+  await writeFile(`${root}/history/nested/second.run`, JSON.stringify(raw(200)));
+  await writeFile(`${root}/settings.json`, '{"synthetic":true}');
+  await prepare(page, true);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "导入文件夹", exact: true }).last().click();
+  const input = page.locator('input[type="file"][webkitdirectory]');
+  await expect(input).toHaveAttribute("directory", "");
+  await expect(input).toHaveAttribute("multiple", "");
+  expect(await input.getAttribute("accept")).toBeNull();
+  await (await chooser).setFiles(root);
+  await expect(count(page)).toHaveText("2");
+  expect(await page.evaluate(() => (window as any).__pickerOptions)).toBeUndefined();
+  expect(await readFile(`${root}/first.run`, "utf8")).toBe(original);
+  await expect(page.getByLabel("自动同步", { exact: true })).toBeDisabled();
+  await reopen(page);
+  await expect(count(page)).toHaveText("2");
+});
+
+test("blocked persistent access leaves records intact and whole-folder import remains available", async ({ page }, info) => {
+  const root = info.outputPath("synthetic-blocked");
+  await mkdir(root, { recursive: true });
+  await writeFile(`${root}/new.run`, JSON.stringify(raw(200)));
+  await prepare(page, true);
+  await importJSON(page, JSON.stringify(dataset()));
+  await expect(count(page)).toHaveText("1");
+  await page.evaluate(() => {
+    Object.defineProperty(window, "showDirectoryPicker", { configurable: true, value: async () => { throw new DOMException("Synthetic directory restriction", "SecurityError"); } });
+  });
+  await page.getByRole("button", { name: "选择同步文件夹", exact: true }).click();
+  await expect(page.locator(".global-error")).toContainText("导入文件夹");
+  await expect(count(page)).toHaveText("1");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "导入文件夹", exact: true }).last().click();
+  await (await chooser).setFiles(root);
+  await expect(page.locator(".global-error")).toHaveCount(0);
+  await expect(count(page)).toHaveText("1");
+  await expect(page.locator(".details").first()).toContainText("synthetic-blocked");
+});
+
 test("browser storage hides native-only actions and serves game assets without IPC", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -141,7 +185,7 @@ test("another tab follows committed data without requiring a page reload", async
 test("read-only directory authorization supports sync and permission renewal", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "目录授权 API 不在 WebKit 中提供，WebKit 验证手动目录导入");
   await prepare(page, true);
-  await page.getByRole("button", { name: "导入文件夹", exact: true }).last().click();
+  await page.getByRole("button", { name: "选择同步文件夹", exact: true }).click();
   await expect(count(page)).toHaveText("1");
   expect(await page.evaluate(() => (window as any).__pickerOptions.mode)).toBe("read");
   expect(await page.evaluate(async () => {

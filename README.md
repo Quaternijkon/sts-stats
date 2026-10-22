@@ -26,7 +26,7 @@ Web 可部署 Release 中的静态资源 ZIP，使用 HTTPS 或 localhost 打开
 
 安装包：macOS 13.3+（Apple Silicon / Intel 通用 DMG），Windows 10/11 x64（NSIS EXE / MSI，使用 WebView2）。旧原生应用要求 macOS 15；新应用使用系统 WebView，最低版本由 WebKit 的本地解压 API 决定。
 
-安装后选择游戏，点击工具栏文件夹导入**单一账号、Profile、普通或 modded 来源**的存档目录。选择带 `profile.save` 的账号目录时跟随当前 Profile，不同来源分别归档；多个未能区分来源的 `progress.save` 会被拒绝。也可以导入单个 `.run` / `progress.save`，或将目录／文件拖入应用窗口。目录导入默认每 2 秒检查，变动通过连续稳定快照后同步；每 60 秒复核内容，启动和回到前台立即检查。自动同步开关分别按游戏保存，首页及未选中的游戏也会继续同步；单独导入文件保持手动更新。`⌘/Ctrl+O` 导入目录、`⇧⌘/Ctrl+O` 导入文件、`⌘/Ctrl+R` 同步、`⌘/Ctrl+0` 返回首页，`⌘/Ctrl+1/2/3` 打开统计／卡牌／记录，`⌘/Ctrl+,` 打开设置。
+安装后选择游戏，点击工具栏文件夹导入**单一账号、Profile、普通或 modded 来源**的存档目录。选择带 `profile.save` 的账号目录时跟随当前 Profile，不同来源分别归档；多个未能区分来源的 `progress.save` 会被拒绝。也可以导入单个 `.run` / `progress.save`，或将目录／文件拖入应用窗口。桌面版目录导入默认每 2 秒检查，变动通过连续稳定快照后同步；每 60 秒复核内容，启动和回到前台立即检查。自动同步开关分别按游戏保存，首页及未选中的游戏也会继续同步；单独导入文件保持手动更新。Web 的「导入文件夹」使用标准整目录选择器，一次性读取全部子目录；Chrome / Edge 可另用「选择同步文件夹」申请只读权限并自动更新。`⌘/Ctrl+O` 导入目录、`⇧⌘/Ctrl+O` 导入文件、`⌘/Ctrl+R` 同步、`⌘/Ctrl+0` 返回首页，`⌘/Ctrl+1/2/3` 打开统计／卡牌／记录，`⌘/Ctrl+,` 打开设置。
 
 旧数据迁移：在对应游戏的「存档管理」中选择「迁移 dataset.json」，再选择原应用的数据文件。Foundation `importedAt` 日期基准和 `runs / progress / source / manifest / fileRunIDs` 保持兼容。迁移不会写回原文件；需要自动同步时重新通过目录选择器授权原存档目录。
 

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserFiles, manualDirectory, type ReadFolder } from "../src/services/browser/files";
+afterEach(() => vi.unstubAllGlobals());
 
 function file(path: string, text = "{}"): File {
   const result = new File([text], path.split("/").at(-1)!, { lastModified: 100 });
@@ -7,6 +8,22 @@ function file(path: string, text = "{}"): File {
   return result;
 }
 describe("browser directory import", () => {
+  it.each(["SecurityError", "NotAllowedError"])("offers whole-folder import when the browser rejects persistent access with %s", async (name) => {
+    const picker = vi.fn(async () => { throw new DOMException("Synthetic denied directory", name); });
+    vi.stubGlobal("window", { showDirectoryPicker: picker });
+    const saveDirectory = vi.fn();
+    const files = new BrowserFiles({ directories: async () => [], directory: async () => undefined, saveDirectory });
+    await expect(files.chooseDirectory("sync")).rejects.toThrow("导入文件夹");
+    expect(picker).toHaveBeenCalledWith({ mode: "read", id: "sts2stats-saves" });
+    expect(saveDirectory).not.toHaveBeenCalled();
+  });
+  it("keeps cancellation separate from denied access and does not register an unused source", async () => {
+    vi.stubGlobal("window", { showDirectoryPicker: async () => { throw new DOMException("Synthetic cancellation", "AbortError"); } });
+    const saveDirectory = vi.fn();
+    const files = new BrowserFiles({ directories: async () => [], directory: async () => undefined, saveDirectory });
+    expect(await files.chooseDirectory("sync")).toBeNull();
+    expect(saveDirectory).not.toHaveBeenCalled();
+  });
   it("follows the current Profile, skips hidden saves and keeps source directories read-only", async () => {
     const files = [file("account/profile.save", '{"last_profile_id":2}'), file("account/profile1/saves/old.run"),
       file("account/profile2/saves/new.run"), file("account/profile2/saves/.hidden.run")];

@@ -52,7 +52,8 @@ export function SaveSyncControls() {
   const [accessError, setAccessError] = useState<string | null>(null);
   const { settings, setSettings, busy, sync, syncSource, syncStatus, syncError, lastSyncedAt, migrationStatus } = useAppStore();
   return <div className="sync-state">
-    <label title={syncSource ? "应用运行时单向归档来源目录，来源删除不会移除已导入历史" : "先选择存档文件夹以启用自动同步"}>
+    <label title={syncSource ? "应用运行时单向归档来源目录，来源删除不会移除已导入历史"
+      : platformCapabilities.desktop ? "先选择存档文件夹以启用自动同步" : "在存档管理点击“选择同步文件夹”并授权读取；普通文件夹导入需要手动更新"}>
       自动同步<input type="checkbox" checked={settings.autoSync} disabled={!syncSource || !platformCapabilities.directorySync || !!migrationStatus}
         onChange={(event) => setSettings({ autoSync: event.target.checked })} />
     </label>
@@ -113,7 +114,10 @@ export function LocalDataPage() {
     <ErrorState error={error} />
     <Card title="存档">
       <div className="action-row">
-        <button disabled={busy} onClick={() => void importDirectory()}><FolderOpen size={16} />导入文件夹</button>
+        <button disabled={busy} title="选择整个存档文件夹，递归导入其中的记录与进度" onClick={() => void importDirectory()}><FolderOpen size={16} />导入文件夹</button>
+        {!platformCapabilities.desktop && platformCapabilities.directorySync && <button disabled={busy}
+          title="申请只读目录权限，在页面运行期间自动读取更新；浏览器拒绝此目录时可使用“导入文件夹”"
+          onClick={() => void importDirectory("sync")}><RefreshCw size={16} />选择同步文件夹</button>}
         <button disabled={busy} onClick={() => void importSingleFiles()}>导入文件</button>
         <button disabled={busy} onClick={() => void importExistingDataset()}>迁移 dataset.json</button>
         <button disabled={busy || exporting} onClick={() => void exportDataset()}><Download size={16} />导出数据</button>

@@ -1,4 +1,4 @@
-import type { ImportSelection, SaveFile } from "../models";
+import type { DirectoryImportMode, ImportSelection, SaveFile } from "../models";
 import type { BrowserDatabase } from "./database";
 
 interface ReadFile { kind: "file"; name: string; getFile(): Promise<File> }
@@ -66,11 +66,17 @@ async function contents(files: { path: string; file: File }[], prefix: string): 
   return result;
 }
 export function pickFiles(directory = false, json = false): Promise<File[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file"; input.multiple = !json; input.hidden = true;
-    input.accept = json ? ".json" : ".run,.save";
-    if (directory) input.setAttribute("webkitdirectory", "");
+    if (directory) {
+      if (!("webkitdirectory" in input)) {
+        reject(new Error("当前浏览器不支持文件夹选择，请使用最新版 Chrome、Edge 或 Safari"));
+        return;
+      }
+      input.webkitdirectory = true;
+      input.setAttribute("directory", "");
+    } else input.accept = json ? ".json" : ".run,.save";
     const finish = (files: File[]) => { input.remove(); resolve(files); };
     input.onchange = () => finish(Array.from(input.files ?? []));
     input.addEventListener("cancel", () => finish([]), { once: true });
@@ -159,13 +165,25 @@ export class BrowserFiles {
     const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
     return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
-  async chooseDirectory(): Promise<ImportSelection | null> {
+  async chooseDirectory(mode: DirectoryImportMode = "manual"): Promise<ImportSelection | null> {
+    if (mode === "manual") return manualDirectory(await pickFiles(true));
     const picker = (window as DirectoryWindow).showDirectoryPicker;
-    if (!picker) return manualDirectory(await pickFiles(true));
+    if (!picker) throw new Error("当前浏览器不支持目录授权，请使用“导入文件夹”读取整个文件夹");
     let handle: ReadFolder;
     try { handle = await picker.call(window, { mode: "read", id: "sts2stats-saves" }); }
-    catch (error) { if (error instanceof DOMException && error.name === "AbortError") return null; throw error; }
-    const directory = await this.register(handle);
+    catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return null;
+      if (error instanceof DOMException && ["SecurityError", "NotAllowedError"].includes(error.name))
+        throw new Error("浏览器不允许持续授权此目录，请改用“导入文件夹”一次性读取整个文件夹");
+      throw error;
+    }
+    let directory: string;
+    try { directory = await this.register(handle); }
+    catch (error) {
+      if (error instanceof DOMException && error.name === "DataCloneError")
+        throw new Error("浏览器无法保存此目录授权，请改用“导入文件夹”读取整个文件夹");
+      throw error;
+    }
     const before = await this.fingerprint(directory);
     const source = await this.resolve(directory);
     const files = await this.scan(directory);

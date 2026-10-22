@@ -78,6 +78,20 @@ beforeEach(() => {
   });
 });
 describe("source and worker transactions", () => {
+  it("opens the directory selector in the click even while a previous game load is queued", async () => {
+    const { useAppStore } = await import("../src/state/appStore");
+    const opening = deferred<ReturnType<typeof snapshot>>();
+    mocks.platform.openDataset.mockReturnValueOnce(opening.promise);
+    const loading = useAppStore.getState().selectGame("sts2");
+    await vi.waitFor(() => expect(mocks.platform.openDataset).toHaveBeenCalled());
+    mocks.platform.chooseDirectory.mockResolvedValue(null);
+    const importing = useAppStore.getState().importDirectory("sync");
+    expect(mocks.platform.chooseDirectory).toHaveBeenCalledWith("sync");
+    opening.resolve(snapshot("sts2"));
+    await Promise.all([loading, importing]);
+    expect(mocks.platform.saveDataset).not.toHaveBeenCalled();
+    expect(useAppStore.getState().busy).toBe(false);
+  });
   it("keeps the game captured when a directory selector spans a game switch", async () => {
     const { useAppStore } = await import("../src/state/appStore");
     await useAppStore.getState().selectGame("sts2");

@@ -8,6 +8,7 @@ import { emptyDataset } from "../services/dataset";
 import type { ImportTransaction } from "../services/dataset";
 import type { Dataset, DatasetSnapshot, DatasetSummary, GameVersion, FilterSpec, Preferences, SaveFile, LegacySelection } from "../services/models";
 import type { AccountSyncSettings, PreparedCloud } from "../services/sync/types";
+import type { DirectoryImportMode } from "../services/models";
 
 const defaults: Preferences = {
   selectedGame: "sts2",
@@ -142,7 +143,7 @@ interface AppState {
   toggleFavorite(id: string): void;
   setSettings(patch: Partial<AppState["settings"]>): void;
   importFiles(files: SaveFile[], source: string, syncDirectory?: string): Promise<void>;
-  importDirectory(): Promise<void>;
+  importDirectory(mode?: DirectoryImportMode): Promise<void>;
   importDropped(): Promise<void>;
   importSingleFiles(): Promise<void>;
   sync(immediately?: boolean): Promise<void>;
@@ -247,10 +248,15 @@ export const useAppStore = create<AppState>((set, get) => {
     else if (get().game === game && !get().ready && loaded[game]) publishDataset(game, loaded[game]!);
     return true;
   }
-  async function operation(game: GameVersion, action: () => Promise<void>, clearError = true) {
+  async function operation<T = void>(game: GameVersion, action: (prepared: T) => Promise<void>, clearError = true, prepare?: () => Promise<T>) {
     if (get().busy) return;
     set(clearError ? { busy: true, error: null } : { busy: true });
-    const running = withEngine(game, action).catch((error) => {
+    // Open selectors in the original click/keypress, before waiting for the worker queue.
+    let prepared: Promise<T> | undefined;
+    try { prepared = prepare?.(); }
+    catch (error) { prepared = Promise.reject(error); }
+    void prepared?.catch(() => {});
+    const running = withEngine(game, async () => action(await prepared as T)).catch((error) => {
       if (!clearError) throw error;
       if (get().game === game) set({ error: message(error) });
     }).finally(() => {
@@ -499,12 +505,11 @@ export const useAppStore = create<AppState>((set, get) => {
       const game = get().game;
       await operation(game, () => selectedImport(game, files, source, directory));
     },
-    async importDirectory() {
+    async importDirectory(mode = "manual") {
       const game = get().game;
-      await operation(game, async () => {
-        const selected = await chooseSource(game, () => platform.chooseDirectory());
+      await operation(game, async (selected) => {
         if (selected) await selectedImport(game, selected.files, selected.source ?? selected.directory, selected.directory);
-      });
+      }, true, () => chooseSource(game, () => platform.chooseDirectory(mode)));
     },
     async importDropped() {
       const game = get().game;
@@ -518,10 +523,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     async importSingleFiles() {
       const game = get().game;
-      await operation(game, async () => {
-        const files = await chooseSource(game, () => platform.chooseFiles());
+      await operation(game, async (files) => {
         if (files.length) await selectedImport(game, files, "files:\n" + [...new Set(files.map((file) => file.path))].sort().join("\n"), "");
-      });
+      }, true, () => chooseSource(game, () => platform.chooseFiles()));
     },
     async sync(immediately = true) { await syncGame(get().game, immediately); },
     async syncAll(immediately = false) {
@@ -532,14 +536,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     async importExistingDataset() {
       const game = get().game;
-      await operation(game, async () => {
-        const imported = await chooseSource(game, () => platform.importDataset());
+      await operation(game, async (imported) => {
         if (!imported) return;
         stopSource(game);
         const previous = await currentDataset(game);
         const dataset = await analysisClient(game).call<Dataset>({ op: "validateDataset", game, dataset: imported });
         await commit(game, dataset, previous);
-      });
+      }, true, () => chooseSource(game, () => platform.importDataset()));
     },
     async restoreArchive(source) {
       const game = get().game;
